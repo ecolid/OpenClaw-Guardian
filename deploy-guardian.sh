@@ -534,7 +534,7 @@ systemctl restart openclaw-guardian
 
 # 每 4 小时执行一次备份
 CRON_CMD="0 */4 * * * $BACKUP_DIR/backup.sh >/dev/null 2>&1"
-(crontab -l 2>/dev/null || true | grep -v "$BACKUP_DIR/backup.sh"; echo "$CRON_CMD") | crontab -
+(crontab -l 2>/dev/null | grep -v "$BACKUP_DIR/backup.sh" || true; echo "$CRON_CMD") | crontab -
 
 echo ""
 echo -e "${CYAN}=================================================================${PLAIN}"
