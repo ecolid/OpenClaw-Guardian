@@ -33,25 +33,39 @@ echo ""
 # =================================================================
 log_step "[0/5] 初始化配置"
 
-# 要求用户输入 Telegram Bot Token
-while true; do
-    read -p "请输入你的 Telegram Bot Token (例如 123456789:ABCdefGHI...): " TG_BOT_TOKEN
-    if [[ "$TG_BOT_TOKEN" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
-        break
-    else
-        log_warn "Token 格式似乎有误，请重新输入。"
-    fi
-done
+ENV_FILE="/root/.openclaw-guardian/.env"
+if [ -f "$ENV_FILE" ]; then
+    log_info "检测到已存在的配置文件 ($ENV_FILE)，自动加载配置跳过输入..."
+    source "$ENV_FILE"
+fi
 
-# 要求用户输入 Telegram Chat ID
-while true; do
-    read -p "请输入接收通知的 Telegram Chat ID (你的个人数字ID，例如 12345678): " TG_CHAT_ID
-    if [[ "$TG_CHAT_ID" =~ ^[0-9]+$ || "$TG_CHAT_ID" =~ ^-[0-9]+$ ]]; then
-        break
-    else
-        log_warn "Chat ID 格式有误，必须是纯数字 (或带负号的群组ID)。"
-    fi
-done
+if [ -z "$TG_BOT_TOKEN" ]; then
+    # 要求用户输入 Telegram Bot Token
+    while true; do
+        read -p "请输入你的 Telegram Bot Token (例如 123456789:ABCdefGHI...): " TG_BOT_TOKEN
+        if [[ "$TG_BOT_TOKEN" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
+            break
+        else
+            log_warn "Token 格式似乎有误，请重新输入。"
+        fi
+    done
+fi
+
+if [ -z "$TG_CHAT_ID" ]; then
+    # 要求用户输入 Telegram Chat ID
+    while true; do
+        read -p "请输入接收通知的 Telegram Chat ID (你的个人数字ID，例如 12345678): " TG_CHAT_ID
+        if [[ "$TG_CHAT_ID" =~ ^[0-9]+$ || "$TG_CHAT_ID" =~ ^-[0-9]+$ ]]; then
+            break
+        else
+            log_warn "Chat ID 格式有误，必须是纯数字 (或带负号的群组ID)。"
+        fi
+    done
+fi
+
+mkdir -p /root/.openclaw-guardian
+echo "TG_BOT_TOKEN=\"$TG_BOT_TOKEN\"" > "$ENV_FILE"
+echo "TG_CHAT_ID=\"$TG_CHAT_ID\"" >> "$ENV_FILE"
 
 log_info "配置完成，准备开始安装环境..."
 
@@ -397,8 +411,9 @@ def set_commands():
         {"command": "status", "description": "查看服务器状态与内存占用"},
         {"command": "backup", "description": "立即全量备份机器人配置"},
         {"command": "rollback", "description": "一键回滚到历史快照"},
-        {"command": "restart", "description": "重启机器人的后端进程"},
-        {"command": "logs", "description": "查看最近的报错日志"}
+        {"command": "logs", "description": "查看最近的报错日志"},
+        {"command": "update", "description": "从 GitHub 热更新守护程序代码"},
+        {"command": "update_rollback", "description": "恢复上一版本的守护程序代码"}
     ]
     try: requests.post(f"{API_URL}/setMyCommands", json={"commands": commands}, timeout=5)
     except: pass
@@ -420,6 +435,29 @@ def handle_msg(msg):
         send_msg("🔄 正在重启 OpenClaw...")
         run_cmd("systemctl restart openclaw")
         send_msg("✅ 重启指令已发送。使用 /status 检查状态。")
+    elif text.startswith("/update"):
+        if text.strip() == "/update_rollback":
+            send_msg("⏪ 收到指令，正在恢复上一版本的守护程序...")
+            res = run_cmd(f"cd {BACKUP_DIR} && [ -f backup.sh.bak ] && cp backup.sh.bak backup.sh && [ -f guardian-bot.py.bak ] && cp guardian-bot.py.bak guardian-bot.py && echo 'OK' || echo 'Error'")
+            if "Error" in res:
+                send_msg("❌ 回滚失败：未找到历史版本的原始快照 (.bak)。")
+            else:
+                send_msg("✅ 回滚解包成功，正在重启监控服务载入旧版大脑...")
+                threading.Thread(target=lambda: os.system("systemctl restart openclaw-guardian")).start()
+        else:
+            send_msg("🔄 收到指令，正在从 GitHub 获取并自动热更新守护程序...")
+            run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
+            update_script = f'''#!/usr/bin/env bash
+curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
+if [ $? -eq 0 ]; then
+  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ 升级部署成功！新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。"
+else
+  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="❌ 升级脚本执行异常，查看日志: {BACKUP_DIR}/update.log，已自动回滚至上一版本。"
+  cd {BACKUP_DIR} && cp backup.sh.bak backup.sh && cp guardian-bot.py.bak guardian-bot.py && systemctl restart openclaw-guardian
+fi
+'''
+            with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
+            os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
     elif text.startswith("/logs"):
         logs = run_cmd("journalctl -u openclaw -n 20 --no-pager")[-3500:]
         send_msg(f"📝 <b>最近日志:</b>\n<pre>{logs}</pre>")
