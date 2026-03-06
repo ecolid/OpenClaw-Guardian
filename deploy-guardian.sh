@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.3.2"
+VERSION = "v1.3.3"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -481,13 +481,14 @@ fi
         
         def do_grep():
             safe_kw = keyword.replace("'", "'\\''")
-            grep_cmd = f"journalctl -u openclaw -n 800 --no-pager | grep -i -C 5 '{safe_kw}' | awk '{{print substr($0, 1, 500)}}'"
+            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 3 次案发现场 (-m 3) 则立刻结束，附带前后 1 行上下文 (-C 1)
+            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr($0, 1, 500)}}' | grep -m 3 -i -C 1 '{safe_kw}'"
             res = run_cmd(grep_cmd).strip()
             if not res:
-                send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
+                send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
             else:
                 if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
+                send_msg(f"🚨 <b>[{keyword}] 最近 3 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
                 
         threading.Thread(target=do_grep).start()
     elif text.startswith("/rollback"):
@@ -515,13 +516,14 @@ def handle_callback(cb):
         
         def do_quick_grep():
             safe_kw = keyword.replace("'", "'\\''")
-            grep_cmd = f"journalctl -u openclaw -n 800 --no-pager | grep -i -C 5 '{safe_kw}' | awk '{{print substr($0, 1, 500)}}'"
+            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 3 次案发现场 (-m 3) 则立刻结束，附带前后 1 行上下文 (-C 1)
+            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr($0, 1, 500)}}' | grep -m 3 -i -C 1 '{safe_kw}'"
             res = run_cmd(grep_cmd).strip()
             if not res:
-                send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
+                send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
             else:
                 if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
+                send_msg(f"🚨 <b>[{keyword}] 最近 3 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
                 
         threading.Thread(target=do_quick_grep).start()
         return
