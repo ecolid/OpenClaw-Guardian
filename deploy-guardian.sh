@@ -129,7 +129,8 @@ IN_EOF
 
 echo "正在打包..."
 # 忽略打包过程中文件被修改(如数据库写入)导致的警告和退出
-tar --warning=no-file-changed -czf "\${BACKUP_FILE}" config/ restore.sh || true
+# 自动排除图片、视频等大体积多媒体文件，防止 Playwright 截图撑爆备份包
+tar --warning=no-file-changed --exclude="*.png" --exclude="*.jpg" --exclude="*.jpeg" --exclude="*.webp" --exclude="*.mp4" -czf "\${BACKUP_FILE}" config/ restore.sh || true
 
 echo "正在处理 Telegram 附件限制 (45MB)..."
 
