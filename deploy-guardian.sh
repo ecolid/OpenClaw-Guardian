@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.3.1"
+VERSION = "v1.3.2"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -463,7 +463,7 @@ fi
             with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
             os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
     elif text.startswith("/logs"):
-        logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | cut -c 1-500")[-3500:]
+        logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | awk '{print substr($0, 1, 500)}'")[-3500:]
         send_msg(f"📝 <b>最近日志:</b>\n<pre>{logs}</pre>")
     elif text.startswith("/grep"):
         keyword = text[5:].strip()
@@ -481,7 +481,7 @@ fi
         
         def do_grep():
             safe_kw = keyword.replace("'", "'\\''")
-            grep_cmd = f"journalctl -u openclaw -n 800 --no-pager | grep -i -C 5 '{safe_kw}' | cut -c 1-500"
+            grep_cmd = f"journalctl -u openclaw -n 800 --no-pager | grep -i -C 5 '{safe_kw}' | awk '{{print substr($0, 1, 500)}}'"
             res = run_cmd(grep_cmd).strip()
             if not res:
                 send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
@@ -515,7 +515,7 @@ def handle_callback(cb):
         
         def do_quick_grep():
             safe_kw = keyword.replace("'", "'\\''")
-            grep_cmd = f"journalctl -u openclaw -n 800 --no-pager | grep -i -C 5 '{safe_kw}' | cut -c 1-500"
+            grep_cmd = f"journalctl -u openclaw -n 800 --no-pager | grep -i -C 5 '{safe_kw}' | awk '{{print substr($0, 1, 500)}}'"
             res = run_cmd(grep_cmd).strip()
             if not res:
                 send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
