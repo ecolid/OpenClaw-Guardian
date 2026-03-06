@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.2.0"
+VERSION = "v1.3.0"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -468,7 +468,14 @@ fi
     elif text.startswith("/grep"):
         keyword = text[5:].strip()
         if not keyword:
-            send_msg("⚠️ 请指定要搜索的关键词，例如: <code>/grep 400</code> 或 <code>/grep DataInspectionFailed</code>")
+            buttons = [
+                [{"text": "🔴 百炼风控拦截 (DataInspectionFailed)", "callback_data": "qg_DataInspectionFailed"}],
+                [{"text": "🟡 网络请求超时 (Timeout)", "callback_data": "qg_Timeout"}],
+                [{"text": "💥 内存耗尽被杀 (Out of memory)", "callback_data": "qg_Out of memory"}],
+                [{"text": "🚨 严重运行异常 (Exception/Error)", "callback_data": "qg_Exception"}],
+                [{"text": "🔵 系统启动记录 (Started)", "callback_data": "qg_Started"}]
+            ]
+            send_msg("✨ <b>快捷诊断面板 (Interactive Grep)</b>\n请选择您要一键回溯的场景，或手动输入如 <code>/grep 400</code>：", {"inline_keyboard": buttons})
             return
         send_msg(f"🔍 正在检索包含 <code>{keyword}</code> 的日志及其上下文...")
         # 搜索最近 2000 条日志，找寻关键词，并附带前后 5 行案发现场
@@ -500,7 +507,19 @@ def handle_callback(cb):
     if str(cb["message"]["chat"]["id"]) != CHAT_ID: return
     try: requests.post(f"{API_URL}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
     except: pass
-    
+    if data.startswith("qg_"):
+        keyword = data[3:]
+        send_msg(f"🔍 [快捷查询] 正在检索包含 <code>{keyword}</code> 的日志及其上下文...")
+        safe_kw = keyword.replace("'", "'\\''")
+        grep_cmd = f"journalctl -u openclaw -n 2000 --no-pager | grep -i -C 5 '{safe_kw}'"
+        res = run_cmd(grep_cmd).strip()
+        if not res:
+            send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
+        else:
+            if len(res) > 3500: res = "...(省略开头以适应长度)...\n\n" + res[-3500:]
+            send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
+        return
+
     if data.startswith("rb_"):
         msg_id_str = data.split("_")[1]
         try:

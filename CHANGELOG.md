@@ -1,8 +1,14 @@
 # OpenClaw Guardian 更新日志
 
-## [v1.2.0] - 2026-03-07
+## [v1.3.0] - 2026-03-07
 ### 新增 (New)
-- 引入指令 `/grep <关键词>` 进行定向日志侦察。支持查询被风控拦截的关键词 (例如 `/grep 400`)，并将案发现场前后 5 行的 Payload 上下文推送到 Telegram，避免了原始 `/logs` 的刷屏与线索遗漏问题。
+- 改进 `/grep` 指令交互：单独发送 `/grep` 时，将呼出一个“快捷诊断面板”(Inline Keyboard)。内置了防打扰的一键回查按钮：
+  - [🔴 百炼风控拦截 (DataInspectionFailed)]
+  - [🟡 网络请求超时 (Timeout)]
+  - [💥 内存耗尽被杀 (Out of memory)]
+  - [🚨 严重运行异常 (Exception/Error)]
+  - [🔵 系统启动记录 (Started)]
+- 支持查询被风控拦截的关键词 (例如 `/grep 400`)，并将案发现场前后 5 行的 Payload 上下文推送到 Telegram，避免了原始 `/logs` 的刷屏与线索遗漏问题。
 
 ---## [v1.1.0] - 2026-03-07
 ### 新增 (New)
