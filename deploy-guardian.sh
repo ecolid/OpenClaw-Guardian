@@ -462,9 +462,16 @@ def handle_callback(cb):
             send_msg("❌ 此记录无文件ID。")
             return
 
-        send_msg(f"⏳ 正在下载 {len(file_ids)} 个备份分卷，请稍候...")
+        send_msg(f"⏳ 正在执行回滚前自动快照...")
         
         def do_rollback():
+            # 回滚前先做一次完整备份，确保当前状态可恢复
+            pre_result = run_cmd(f"{BACKUP_DIR}/backup.sh")
+            if "发送成功" in pre_result:
+                send_msg("✅ 回滚前快照已保存。正在下载目标备份...")
+            else:
+                send_msg("⚠️ 回滚前快照失败，但仍将继续回滚。当前配置已本地备份至 ~/.openclaw_old")
+            
             local_merged_file = f"/tmp/rb_{int(time.time())}.tar.gz"
             try:
                 with open(local_merged_file, "wb") as f_out:
