@@ -1,55 +1,76 @@
-# OpenClaw Guardian 是专为基于阿里百炼 (DASHSCOPE) 运作的中文原神 AI 智能体 [OpenClaw](https://github.com/vual/OpenClaw) 设计的一键化部署、状态监控与容灾守护框架。
+# OpenClaw Guardian 🛡️
 
-**当前稳定版本**: `v1.4.5` (已通过高并发压测，修复了死锁与转义奔溃，推荐作为核心生产环境部署)。
+OpenClaw Guardian 是专为基于阿里百炼 (DASHSCOPE) 运作的中文原神 AI 智能体 [OpenClaw](https://github.com/vual/OpenClaw) 设计的**一键化部署、状态监控与容灾守护框架**。
 
-全天候监控你的 OpenClaw 服务状态，修改配置实时防抖备份，并在发生崩溃时第一时间将系统状态推送到你的 Telegram。
+**当前稳定版本**: `v1.4.6` (极客仪表盘版本，已通过高并发死锁压测，推荐作为核心生产环境部署)。
+
+全天候监控你的 OpenClaw 服务状态，动态热备份配置，并在发生崩溃或被风控拦截时，第一时间将系统底层日志推送到你的 Telegram。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## ✨ 最新特性 (v1.4.6)
+
+- **极客态视觉面板 (Visual Dashboard)**：重新设计的 `/status` 仪表盘，支持 CPU、内存、Swap 交换分区、磁盘水位的 ASCII 动态图表（`[██████░░░░]`）与红黄绿情绪指示器。
+- **深层日志防崩溃截获 (HTML Escaping)**：完美劫持并转义包含 `<400> DataInspectionFailed` 等破坏性代码的底层崩溃报错，确保 100% 送达 Telegram 防静默吞没。
+- **双通道热更新与净网启动**：支持从 GitHub 一键热更新守护程序自身代码，且内置强效防御机制，启动时自动清扫未读的过期报错消息，免疫“死亡循环”。
+- **系统级死亡级参数监控**：实时监控主机 1/5/15 分钟 CPU 平均负载 (Loadavg) 与真实存活时间，帮助你提前介入 OOM (内存溢出) 和死锁危机。
 
 ## ✨ 核心特性
 
 - **双通道状态机监控**：独创 `journalctl` 实时流(秒级告警) + 60s `systemctl` 金标准轮询兜底，确保状态检测 100% 准确，防刷屏防卡死。
-- **智能防抖备份**：监听配置和记忆（Agents）文件夹，改动后自动缓冲 5 分钟后静默合并备份，告别碎片化文件。
-- **定时全量备份**：默认每 4 小时全自动热备份配置和对话历史，打包发送至个人 Telegram 单线联系存档。
-- **一键回滚历史快照**：Telegram 内联按钮直接展示最近备份记录，点选即可实现脱机热更新与一键回滚，全过程无人值守。
-- **交互式命令菜单**：支持 `/status` (查内存/状态)、`/restart` (强制重启)、`/logs` (看崩溃堆栈)。
+- **智能防抖增量备份**：监听配置和记忆（Agents）文件夹，改动后自动缓冲 5 分钟后静默打包，告别碎片化操作。
+- **定时与交互式热备份**：默认每隔数小时热备历史，并支持在 Telegram 内点选最近 10 次历史快照**一键无损回滚**（自带二次确认防误触机制）。
+- **进程外围独立运行**：Guardian 与主业务进程完全解耦，即便 OpenClaw 因配置错误陷入死循环崩溃，Guardian 依然独立存活并随时接受你的远控抢救指令。
 
-## 🚀 一键安装
+## 🚀 一键安装与覆盖
 
-环境要求：基于 Systemd 部署的 Ubuntu/Debian 系统，且正在运行 OpenClaw。
+环境要求：基于 Systemd 部署的 Ubuntu/Debian 体系系统 (如阿里云 VPS)，且建议运行于 1核2G 规格或之上。
 无需安装 Node/Docker，纯底层轻量级 Python + Bash 实现。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ecolid/openclaw-guardian/main/deploy-guardian.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | sudo bash
 ```
-
-安装过程中会提示你输入两个必填参数。
+> **提示**：更新和热修复如果遇到报错死循环时，可随时在终端再次运行上方指令强制覆盖升级，原有的聊天配置和记忆将受到自动保护。
 
 ## ⚙️ 准备工作 (Bot 配置)
 
-在你运行一键安装之前，你需要准备好：
+在运行安装前，请准备好两大核心密钥：
+1. **Telegram Bot Token**: 向 `@BotFather` 发送 `/newbot` 生成 (格式如 `123456789:AAEF...`)
+2. **个人 Chat ID**: 搜索与 `@userinfobot` 交互获取的纯数字 UID
 
-1. **Telegram Bot Token**:
-   - 在 Telegram 中搜索 `@BotFather`
-   - 发送 `/newbot` 创建一个新机器人
-   - 复制生成的 API Token (格式如 `123456789:AAEF...`)
+## 🛠️ 互动交互指令集
 
-2. **你的个人 Chat ID**:
-   - 在 Telegram 中搜索 `@userinfobot` 或 `@getmyid_bot`
-   - 获取你的纯数字 ID (例如 `5722324304`)
+在你的 Telegram 监控频道内，可直接点击菜单或发送以下指令接管服务器：
 
-## 🛠️ Bot 指令说明
-
-在与你的 Guardian Bot 私聊时，可以直接发送以下命令（菜单中已内置提示）：
-
-| 命令 | 功能描述 |
+| 快捷命令 | 战术功能描述 |
 |---|---|
-| `/status` | 返回 OpenClaw 服务的存活状态、VPS CPU/内存和磁盘使用率 |
-| `/backup` | 忽略定时和防抖倒计时，立即执行一次全量热备份 |
-| `/rollback` | 调出内联按钮菜单，列出最近 10 次历史快照。点击后自动下载、解压、覆盖并重启服务 |
-| `/restart` | 直接在 VPS 层面执行 `systemctl restart openclaw` |
-| `/logs`    | 截取最近的 20 行 `journalctl` 崩溃核心日志发至聊天窗口 |
+| `/status` | 呼出极客态仪表盘。监控 CPU、内存、Swap交换空间、磁盘碎片与 15 分钟系统负载热度 |
+| `/grep 关键词`| **(核心排错)** 定向提取包含关键词（如 400, timeout, error）的最近 5 次带上下文字符的案发现场系统日志 |
+| `/backup` | 忽略倒计时，立即执行一次覆盖配置的强制远程全量热备份 |
+| `/rollback` | 调出快照仓库大盘，点选指定的历史时间线，二次确认后执行时光倒流解压覆盖。 |
+| `/update` | 连线 GitHub 主干，触发无缝代码热更新，接管最新的特性分发。 |
+| `/logs`    | 盲抓最近 20 行崩溃堆栈日志发至聊天窗口。 |
+| `/restart` | 控制系统执行强制断电重启 (`systemctl restart openclaw`)。 |
 
 ---
 
-*OpenClaw Guardian 作为一个与主进程完全解耦的 Sidecar 守护程序运行。即便 OpenClaw 因配置错误陷入死循环崩溃，Guardian 依然独立存活并随时接受你的指令。*
+## 💡 进阶：如何像资深 SRE 一样思考与排错 (Mental Model)
+
+无论你是寻求社区援助还是利用 AI 辅助排错，请建立起这套**高级运维心智模型**：
+
+**1. 建立「三层隔离」的直觉**
+当机器人没反应时，永远要问自己：是 **云平台(网络/风控)** 的问题，是 **操作系统(VPS环境)** 的问题，还是 **业务进程(OpenClaw)** 的问题？
+如果 SSH 能连上、Guardian Bot 还能回你 `/status`，说明前两层完美存活。你就不用去怀疑 VPS 宕机了，直接用 `/grep` 查找报错就行。分层的直觉能帮你省去 90% 的无头苍蝇式乱撞。
+
+**2. 把日志 (Log) 当作第一证据，而不是主观现象**
+“为什么他老是闪退？”、“为什么点按钮没反应？” 这些都是主观现象。
+正确的做法是：**“调出客观尸检报告”**。
+通过发送 `/grep Error`、`/grep Exception` 甚至 `/grep Failed`，把你提取到的那一串别人看不懂的英文长代码复制出来。比如这次的 `<400> DataInspectionFailed`，它才是真正能让你和 AI 一秒钟看穿阿里百炼安全风控的线索。**没有底层日志，就没有排错真相。**
+
+**3. 对「瞬态满载」和资源枯竭的敬畏**
+对于 1核2G 这样单薄的机器：
+- 当 **Swap（交换分区）** 飙高超过 50% 时，说明物理内存已死，系统正在像疯狗一样把极慢的硬盘当内存读写（即 IO 锁死现象）。
+- 此时不论发生任何卡顿或断网都是正常的。千万不要在此时疯狂乱点键盘或 Telegram 的按钮发送多重指令，这只会让积压的消息核弹把进程彻底压死。
+- 你此时该思考的不是“为什么程序在卡？”，而是思考“我是不是该增加服务器配置”或是“是否该去底层的 `systemd` 配置里设定 cgroups 最大内存限制（OOM 保护伞）”。
+
+*将 Guardian 视作你的手术测温枪，而不是万能魔法杖。当它亮起黄灯或红灯时，不要慌张，利用它赋予你的探测力，精准切割病灶！*
