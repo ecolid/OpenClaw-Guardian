@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.1.0"
+VERSION = "v1.2.0"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -413,6 +413,7 @@ def set_commands():
         {"command": "backup", "description": "立即全量备份机器人配置"},
         {"command": "rollback", "description": "一键回滚到历史快照"},
         {"command": "logs", "description": "查看最近的报错日志"},
+        {"command": "grep", "description": "定向搜索日志并提取上下文 (如 /grep 400)"},
         {"command": "update", "description": "从 GitHub 热更新守护程序代码"},
         {"command": "update_rollback", "description": "恢复上一版本的守护程序代码"}
     ]
@@ -464,6 +465,22 @@ fi
     elif text.startswith("/logs"):
         logs = run_cmd("journalctl -u openclaw -n 20 --no-pager")[-3500:]
         send_msg(f"📝 <b>最近日志:</b>\n<pre>{logs}</pre>")
+    elif text.startswith("/grep"):
+        keyword = text[5:].strip()
+        if not keyword:
+            send_msg("⚠️ 请指定要搜索的关键词，例如: <code>/grep 400</code> 或 <code>/grep DataInspectionFailed</code>")
+            return
+        send_msg(f"🔍 正在检索包含 <code>{keyword}</code> 的日志及其上下文...")
+        # 搜索最近 2000 条日志，找寻关键词，并附带前后 5 行案发现场
+        safe_kw = keyword.replace("'", "'\\''")
+        grep_cmd = f"journalctl -u openclaw -n 2000 --no-pager | grep -i -C 5 '{safe_kw}'"
+        res = run_cmd(grep_cmd).strip()
+        if not res:
+            send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
+        else:
+            # Telegram 消息长度限制 4096，留点余量
+            if len(res) > 3500: res = "...(省略开头以适应长度)...\n\n" + res[-3500:]
+            send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
     elif text.startswith("/rollback"):
         try:
             with open(HISTORY_FILE, "r") as f: history = json.load(f)
