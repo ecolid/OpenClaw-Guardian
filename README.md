@@ -1,6 +1,6 @@
-# OpenClaw Guardian 🛡️
+# OpenClaw Guardian 是专为基于阿里百炼 (DASHSCOPE) 运作的中文原神 AI 智能体 [OpenClaw](https://github.com/vual/OpenClaw) 设计的一键化部署、状态监控与容灾守护框架。
 
-为 [OpenClaw](https://github.com/AI-Citizen/OpenClaw) 量身定制的终极备份与守护机器人。
+**当前稳定版本**: `v1.4.5` (已通过高并发压测，修复了死锁与转义奔溃，推荐作为核心生产环境部署)。
 
 全天候监控你的 OpenClaw 服务状态，修改配置实时防抖备份，并在发生崩溃时第一时间将系统状态推送到你的 Telegram。
 
