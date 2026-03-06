@@ -450,8 +450,8 @@ def handle_msg(msg):
             run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
             update_script = f'''#!/usr/bin/env bash
 curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
-if [ $? -eq 0 ]; then
-  CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{if (p) exit; p=1; next} p')
+if [ \$? -eq 0 ]; then
+  CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{{if (p) exit; p=1; next}} p')
   if [ -z "\$CHANGELOG" ]; then CHANGELOG="本次升降级未提供更新日志说明。"; fi
   curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
 else
