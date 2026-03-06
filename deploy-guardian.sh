@@ -300,9 +300,10 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.3.5"
+VERSION = "v1.4.0"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+grep_lock = threading.Lock()
 
 def send_msg(text, reply_markup=None):
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
@@ -310,9 +311,10 @@ def send_msg(text, reply_markup=None):
     try: requests.post(f"{API_URL}/sendMessage", json=payload, timeout=10)
     except: pass
 
-def run_cmd(cmd):
-    try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT)
+def run_cmd(cmd, timeout_sec=None):
+    try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=timeout_sec)
     except subprocess.CalledProcessError as e: return e.output
+    except subprocess.TimeoutExpired: return f"[Timeout] 指令执行超过 {timeout_sec} 秒，为保护系统资源已被强行中断。"
 
 # --- 监控逻辑 ---
 def health_monitor():
@@ -405,6 +407,23 @@ def config_monitor():
                     if wait_time > 20: 
                         send_msg(f"👀 收到改动通知（当前在备份冷却期），已排期于 {int(wait_time)} 秒后合并备份。")
         time.sleep(2)
+def ota_monitor():
+    """后台轮询 GitHub 检查更新"""
+    notified_version = VERSION
+    while True:
+        time.sleep(1800)
+        try:
+            r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=10)
+            if r.status_code == 200:
+                for line in r.text.split('\n'):
+                    if line.startswith('VERSION = "'):
+                        remote_version = line.split('"')[1]
+                        if remote_version != VERSION and remote_version != notified_version:
+                            btn = [[{"text": "📥 立即热更新系统 (OTA)", "callback_data": "ota_update"}]]
+                            send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>\n\n点击下方按钮或发送 /update 立即热部署。", {"inline_keyboard": btn})
+                            notified_version = remote_version
+                        break
+        except: pass
 
 # --- 指令处理 ---
 def set_commands():
@@ -477,18 +496,23 @@ fi
             ]
             send_msg("✨ <b>快捷诊断面板 (Interactive Grep)</b>\n请选择您要一键回溯的场景，或手动输入如 <code>/grep 400</code>：", {"inline_keyboard": buttons})
             return
-        send_msg(f"🔍 正在后台检索包含 <code>{keyword}</code> 的日志及其上下文，可能需要几秒钟...")
-        
         def do_grep():
-            safe_kw = keyword.replace("'", "'\\''")
-            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
-            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
-            res = run_cmd(grep_cmd).strip()
-            if not res:
-                send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
-            else:
-                if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+            if not grep_lock.acquire(blocking=False):
+                send_msg("⏳ 当前已有日志检索任务正在执行，为保护服务器 IO 原性能，请等待上一条查询完成...")
+                return
+            try:
+                send_msg(f"🔍 正在后台检索包含 <code>{keyword}</code> 的日志及其上下文，可能需要几秒钟...")
+                safe_kw = keyword.replace("'", "'\\''")
+                # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
+                grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
+                res = run_cmd(grep_cmd, timeout_sec=60).strip()
+                if not res:
+                    send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
+                else:
+                    if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
+                    send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+            finally:
+                grep_lock.release()
                 
         threading.Thread(target=do_grep).start()
     elif text.startswith("/rollback"):
@@ -510,20 +534,31 @@ def handle_callback(cb):
     if str(cb["message"]["chat"]["id"]) != CHAT_ID: return
     try: requests.post(f"{API_URL}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
     except: pass
+    
+    if data == "ota_update":
+        handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
+        return
+        
     if data.startswith("qg_"):
         keyword = data[3:]
-        send_msg(f"🔍 [快捷查询] 正在后台检索包含 <code>{keyword}</code> 的日志，请耐心等待...")
         
         def do_quick_grep():
-            safe_kw = keyword.replace("'", "'\\''")
-            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
-            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
-            res = run_cmd(grep_cmd).strip()
-            if not res:
-                send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
-            else:
-                if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+            if not grep_lock.acquire(blocking=False):
+                send_msg("⏳ 当前已有日志检索任务正在执行，为保护服务器 IO 原性能，请等待上一条查询完成...")
+                return
+            try:
+                send_msg(f"🔍 [快捷查询] 正在后台检索包含 <code>{keyword}</code> 的日志，请耐心等待...")
+                safe_kw = keyword.replace("'", "'\\''")
+                # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
+                grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
+                res = run_cmd(grep_cmd, timeout_sec=60).strip()
+                if not res:
+                    send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
+                else:
+                    if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
+                    send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+            finally:
+                grep_lock.release()
                 
         threading.Thread(target=do_quick_grep).start()
         return
@@ -581,6 +616,7 @@ def main():
     send_msg("👋 <b>Guardian 守护进程已启动并接管 OpenClaw！</b>\n随时可以使用 /status 检查状态。")
     threading.Thread(target=health_monitor, daemon=True).start()
     threading.Thread(target=config_monitor, daemon=True).start()
+    threading.Thread(target=ota_monitor, daemon=True).start()
     offset = None
     while True:
         try:
