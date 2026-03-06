@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.1"
+VERSION = "v1.4.2"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -504,7 +504,7 @@ fi
                 send_msg(f"🔍 正在后台检索包含 <code>{keyword}</code> 的日志及其上下文，可能需要几秒钟...")
                 safe_kw = keyword.replace("'", "'\\''")
                 # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
-                grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
+                grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
                 res = run_cmd(grep_cmd, timeout_sec=60).strip()
                 if not res:
                     send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
@@ -550,7 +550,7 @@ def handle_callback(cb):
                 send_msg(f"🔍 [快捷查询] 正在后台检索包含 <code>{keyword}</code> 的日志，请耐心等待...")
                 safe_kw = keyword.replace("'", "'\\''")
                 # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
-                grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
+                grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
                 res = run_cmd(grep_cmd, timeout_sec=60).strip()
                 if not res:
                     send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
