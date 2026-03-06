@@ -477,17 +477,19 @@ fi
             ]
             send_msg("✨ <b>快捷诊断面板 (Interactive Grep)</b>\n请选择您要一键回溯的场景，或手动输入如 <code>/grep 400</code>：", {"inline_keyboard": buttons})
             return
-        send_msg(f"🔍 正在检索包含 <code>{keyword}</code> 的日志及其上下文...")
-        # 搜索最近 2000 条日志，找寻关键词，并附带前后 5 行案发现场
-        safe_kw = keyword.replace("'", "'\\''")
-        grep_cmd = f"journalctl -u openclaw -n 2000 --no-pager | grep -i -C 5 '{safe_kw}'"
-        res = run_cmd(grep_cmd).strip()
-        if not res:
-            send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
-        else:
-            # Telegram 消息长度限制 4096，留点余量
-            if len(res) > 3500: res = "...(省略开头以适应长度)...\n\n" + res[-3500:]
-            send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
+        send_msg(f"🔍 正在后台检索包含 <code>{keyword}</code> 的日志及其上下文，可能需要几秒钟...")
+        
+        def do_grep():
+            safe_kw = keyword.replace("'", "'\\''")
+            grep_cmd = f"journalctl -u openclaw -n 2000 --no-pager | grep -i -C 5 '{safe_kw}'"
+            res = run_cmd(grep_cmd).strip()
+            if not res:
+                send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
+            else:
+                if len(res) > 3500: res = "...(省略开头以适应长度)...\n\n" + res[-3500:]
+                send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
+                
+        threading.Thread(target=do_grep).start()
     elif text.startswith("/rollback"):
         try:
             with open(HISTORY_FILE, "r") as f: history = json.load(f)
@@ -509,15 +511,19 @@ def handle_callback(cb):
     except: pass
     if data.startswith("qg_"):
         keyword = data[3:]
-        send_msg(f"🔍 [快捷查询] 正在检索包含 <code>{keyword}</code> 的日志及其上下文...")
-        safe_kw = keyword.replace("'", "'\\''")
-        grep_cmd = f"journalctl -u openclaw -n 2000 --no-pager | grep -i -C 5 '{safe_kw}'"
-        res = run_cmd(grep_cmd).strip()
-        if not res:
-            send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
-        else:
-            if len(res) > 3500: res = "...(省略开头以适应长度)...\n\n" + res[-3500:]
-            send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
+        send_msg(f"🔍 [快捷查询] 正在后台检索包含 <code>{keyword}</code> 的日志，请耐心等待...")
+        
+        def do_quick_grep():
+            safe_kw = keyword.replace("'", "'\\''")
+            grep_cmd = f"journalctl -u openclaw -n 2000 --no-pager | grep -i -C 5 '{safe_kw}'"
+            res = run_cmd(grep_cmd).strip()
+            if not res:
+                send_msg(f"✅ 在最近的日志中未找到与 <code>{keyword}</code> 相关的记录。")
+            else:
+                if len(res) > 3500: res = "...(省略开头以适应长度)...\n\n" + res[-3500:]
+                send_msg(f"🚨 <b>[{keyword}] 案发现场捞取结果:</b>\n<pre>{res}</pre>")
+                
+        threading.Thread(target=do_quick_grep).start()
         return
 
     if data.startswith("rb_"):
