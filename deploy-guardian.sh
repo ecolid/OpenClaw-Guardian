@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.3"
+VERSION = "v1.4.4"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -466,7 +466,7 @@ def handle_msg(msg):
                 send_msg("❌ 回滚失败：未找到历史版本的原始快照 (.bak)。")
             else:
                 send_msg("✅ 回滚解包成功，正在重启监控服务载入旧版大脑...")
-                threading.Thread(target=lambda: os.system("systemctl restart openclaw-guardian")).start()
+                threading.Thread(target=lambda: (time.sleep(3), os.system("systemctl restart openclaw-guardian"))).start()
         else:
             send_msg("🔄 收到指令，正在从 GitHub 获取并自动热更新守护程序...")
             run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
