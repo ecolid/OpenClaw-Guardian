@@ -300,6 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
+VERSION = "v1.1.0"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -427,7 +428,7 @@ def handle_msg(msg):
         status = run_cmd("systemctl is-active openclaw").strip()
         mem = run_cmd("free -m | awk 'NR==2{printf \"%.2f%%\", \$3*100/\$2 }'")
         disk = run_cmd("df -h / | awk 'NR==2{print \$5}'")
-        send_msg(f"📊 <b>系统状态</b>\nOpenClaw: <code>{status}</code>\n内存使用: <code>{mem}</code>\n磁盘空间: <code>{disk}</code>")
+        send_msg(f"📊 <b>系统状态 (Guardian {VERSION})</b>\nOpenClaw: <code>{status}</code>\n内存使用: <code>{mem}</code>\n磁盘空间: <code>{disk}</code>")
     elif text.startswith("/backup"):
         send_msg("⏳ 正在执行全量备份，请稍候...")
         threading.Thread(target=lambda: run_cmd(f"{BACKUP_DIR}/backup.sh")).start()
@@ -450,7 +451,9 @@ def handle_msg(msg):
             update_script = f'''#!/usr/bin/env bash
 curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
 if [ $? -eq 0 ]; then
-  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ 升级部署成功！新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。"
+  CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{if (p) exit; p=1; next} p')
+  if [ -z "\$CHANGELOG" ]; then CHANGELOG="本次升降级未提供更新日志说明。"; fi
+  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
 else
   curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="❌ 升级脚本执行异常，查看日志: {BACKUP_DIR}/update.log，已自动回滚至上一版本。"
   cd {BACKUP_DIR} && cp backup.sh.bak backup.sh && cp guardian-bot.py.bak guardian-bot.py && systemctl restart openclaw-guardian
