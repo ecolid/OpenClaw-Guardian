@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.0"
+VERSION = "v1.4.1"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -411,7 +411,7 @@ def ota_monitor():
     """后台轮询 GitHub 检查更新"""
     notified_version = VERSION
     while True:
-        time.sleep(1800)
+        time.sleep(600)
         try:
             r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=10)
             if r.status_code == 200:
