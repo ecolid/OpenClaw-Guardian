@@ -77,8 +77,8 @@ if [ "$EUID" -ne 0 ]; then
   log_error "请使用 root 权限运行此脚本 (例如: sudo bash deploy-guardian.sh)"
 fi
 
-apt-get update -y
-apt-get install -y tar curl jq cron python3 python3-pip python3-venv inotify-tools
+DEBIAN_FRONTEND=noninteractive apt-get update -y
+DEBIAN_FRONTEND=noninteractive apt-get install -y tar curl jq cron python3 python3-pip python3-venv inotify-tools
 
 BACKUP_DIR="/opt/openclaw-guardian"
 mkdir -p "$BACKUP_DIR"
