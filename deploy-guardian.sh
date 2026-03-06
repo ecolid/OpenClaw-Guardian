@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.4"
+VERSION = "v1.4.5"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -472,7 +472,7 @@ def handle_msg(msg):
             run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
             update_script = f'''#!/usr/bin/env bash
 curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
-if [ \$? -eq 0 ]; then
+if [ \\$? -eq 0 ]; then
   CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{{if (p) exit; p=1; next}} p')
   if [ -z "\$CHANGELOG" ]; then CHANGELOG="本次升降级未提供更新日志说明。"; fi
   curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
@@ -632,6 +632,13 @@ def main():
     threading.Thread(target=health_monitor, daemon=True).start()
     threading.Thread(target=config_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
+    try:
+        r = requests.get(f"{API_URL}/getUpdates", timeout=5).json()
+        if r.get("ok") and r["result"]:
+            ignored = r["result"][-1]["update_id"] + 1
+            requests.get(f"{API_URL}/getUpdates", params={"offset": ignored, "timeout": 1})
+    except: pass
+    
     offset = None
     while True:
         try:
