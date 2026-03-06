@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.5"
+VERSION = "v1.4.6"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -315,6 +315,18 @@ def run_cmd(cmd, timeout_sec=None):
     try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=timeout_sec)
     except subprocess.CalledProcessError as e: return e.output
     except subprocess.TimeoutExpired: return f"[Timeout] 指令执行超过 {timeout_sec} 秒，为保护系统资源已被强行中断。"
+
+def gen_bar(pct, length=10):
+    try: p = float(pct)
+    except: p = 0.0
+    filled = int(round(p / 100 * length))
+    if filled > length: filled = length
+    elif filled < 0: filled = 0
+    bar = "█" * filled + "░" * (length - filled)
+    if p < 60: icon = "🟢"
+    elif p < 85: icon = "🟡"
+    else: icon = "🔴"
+    return f"{icon} [{bar}] {p: >4.1f}%"
 
 # --- 监控逻辑 ---
 def health_monitor():
@@ -445,12 +457,70 @@ def handle_msg(msg):
     if str(msg["chat"]["id"]) != CHAT_ID: return
 
     if text.startswith("/status"):
-        status = run_cmd("systemctl is-active openclaw").strip()
-        mem = run_cmd("free -m | awk 'NR==2{printf \"%.2f%%\", \$3*100/\$2 }'").strip()
-        disk = run_cmd("df -h / | awk 'NR==2{print \$5}'").strip()
-        uptime = run_cmd("uptime -p").strip()
-        load = run_cmd("cat /proc/loadavg | awk '{print \$1, \$2, \$3}'").strip()
-        send_msg(f"📊 <b>系统状态 (Guardian {VERSION})</b>\nOpenClaw: <code>{status}</code>\n运行时间: <code>{uptime}</code>\n系统负载: <code>{load}</code>\n内存使用: <code>{mem}</code>\n磁盘空间: <code>{disk}</code>")
+        send_msg("⏳ 正在采集硬件深层指标，请稍候...")
+        try:
+            # Service Status
+            oc_status = run_cmd("systemctl is-active openclaw").strip().upper()
+            oc_emoji = "🟢" if oc_status == "ACTIVE" else "🔴"
+            oc_uptime = run_cmd("systemctl show openclaw --property=ActiveEnterTimestamp | awk -F= '{print \$2}'").strip()
+            if oc_uptime:
+                try:
+                    enter_ts = subprocess.check_output(f"date -d '{oc_uptime}' +%s", shell=True).strip()
+                    now_ts = time.time()
+                    diff = int(now_ts) - int(enter_ts)
+                    h, m = diff // 3600, (diff % 3600) // 60
+                    oc_time_str = f"运行 {h}h {m}m"
+                except: oc_time_str = "运行时间未知"
+            else: oc_time_str = "已停止"
+
+            # Host Uptime & Load
+            uptime = run_cmd("uptime -p").strip().replace("up ", "")
+            load = run_cmd("cat /proc/loadavg | awk '{print \$1, \"|\", \$2, \"|\", \$3}'").strip()
+            
+            # CPU
+            cpu_idle = run_cmd("top -bn1 | grep 'Cpu(s)' | awk '{print \$8}'").strip()
+            try: cpu_pct = 100.0 - float(cpu_idle)
+            except: cpu_pct = 0.0
+            
+            # Memory & Swap
+            free_out = run_cmd("free -m | awk 'NR==2{print \$3, \$2}; NR==3{print \$3, \$2}'").strip().split('\n')
+            try:
+                mem_used, mem_tot = map(int, free_out[0].split())
+                mem_pct = (mem_used / mem_tot) * 100 if mem_tot else 0
+                mem_str = f"{(mem_used/1024):.1f}G/{(mem_tot/1024):.1f}G"
+            except: mem_pct, mem_str = 0.0, "?/?"
+            
+            try:
+                swap_used, swap_tot = map(int, free_out[1].split())
+                swap_pct = (swap_used / swap_tot) * 100 if swap_tot else 0
+                swap_str = f"{(swap_used/1024):.1f}G/{(swap_tot/1024):.1f}G"
+            except: swap_pct, swap_str = 0.0, "0G/0G"
+
+            # Disk
+            df_out = run_cmd("df -h / | awk 'NR==2{print \$5, \$3, \$4}'").strip().split()
+            try:
+                disk_pct = float(df_out[0].replace('%', ''))
+                disk_str = f"用{df_out[1]}/剩{df_out[2]}"
+            except: disk_pct, disk_str = 0.0, "?/?"
+
+            # Dashboard Assembly
+            dash = f'''📊 <b>核心引擎状态 (Guardian {VERSION})</b>
+-----------------------------------
+{oc_emoji} <b>OpenClaw</b> [<code>{oc_status}</code>] ({oc_time_str})
+⏱️ <b>宿主机 Uptime</b>: <code>{uptime}</code>
+🔥 <b>负载热度</b> (1/5/15m): <code>{load}</code>
+
+<b>[硬件水位监测]</b>
+<pre>
+🧠 CPU: {gen_bar(cpu_pct)}
+🐏 内存: {gen_bar(mem_pct)} ({mem_str})
+🔄 Swap: {gen_bar(swap_pct)} ({swap_str})
+💽 磁盘: {gen_bar(disk_pct)} ({disk_str})
+</pre>
+-----------------------------------'''
+            send_msg(dash)
+        except Exception as e:
+            send_msg(f"❌ 状态面板渲染异常: {str(e)}")
     elif text.startswith("/backup"):
         send_msg("⏳ 正在执行全量备份，请稍候...")
         threading.Thread(target=lambda: run_cmd(f"{BACKUP_DIR}/backup.sh")).start()
