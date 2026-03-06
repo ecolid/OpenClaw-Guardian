@@ -294,13 +294,13 @@ chmod +x "$BACKUP_DIR/restore.sh"
 log_step "[4/5] 生成 Guardian Bot..."
 
 cat > "$BACKUP_DIR/guardian-bot.py" <<EOF
-import requests, time, subprocess, json, os, threading
+import requests, time, subprocess, json, os, threading, html
 
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.2"
+VERSION = "v1.4.3"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -446,9 +446,11 @@ def handle_msg(msg):
 
     if text.startswith("/status"):
         status = run_cmd("systemctl is-active openclaw").strip()
-        mem = run_cmd("free -m | awk 'NR==2{printf \"%.2f%%\", \$3*100/\$2 }'")
-        disk = run_cmd("df -h / | awk 'NR==2{print \$5}'")
-        send_msg(f"📊 <b>系统状态 (Guardian {VERSION})</b>\nOpenClaw: <code>{status}</code>\n内存使用: <code>{mem}</code>\n磁盘空间: <code>{disk}</code>")
+        mem = run_cmd("free -m | awk 'NR==2{printf \"%.2f%%\", \$3*100/\$2 }'").strip()
+        disk = run_cmd("df -h / | awk 'NR==2{print \$5}'").strip()
+        uptime = run_cmd("uptime -p").strip()
+        load = run_cmd("cat /proc/loadavg | awk '{print \$1, \$2, \$3}'").strip()
+        send_msg(f"📊 <b>系统状态 (Guardian {VERSION})</b>\nOpenClaw: <code>{status}</code>\n运行时间: <code>{uptime}</code>\n系统负载: <code>{load}</code>\n内存使用: <code>{mem}</code>\n磁盘空间: <code>{disk}</code>")
     elif text.startswith("/backup"):
         send_msg("⏳ 正在执行全量备份，请稍候...")
         threading.Thread(target=lambda: run_cmd(f"{BACKUP_DIR}/backup.sh")).start()
@@ -483,7 +485,7 @@ fi
             os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
     elif text.startswith("/logs"):
         logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | awk '{print substr(\$0, 1, 500)}'")[-3500:]
-        send_msg(f"📝 <b>最近日志:</b>\n<pre>{logs}</pre>")
+        send_msg(f"📝 <b>最近日志:</b>\n<pre>{html.escape(logs)}</pre>")
     elif text.startswith("/grep"):
         keyword = text[5:].strip()
         if not keyword:
@@ -510,7 +512,7 @@ fi
                     send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
                 else:
                     if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                    send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+                    send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{html.escape(res)}</pre>")
             finally:
                 grep_lock.release()
                 
@@ -556,14 +558,18 @@ def handle_callback(cb):
                     send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
                 else:
                     if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                    send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+                    send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{html.escape(res)}</pre>")
             finally:
                 grep_lock.release()
                 
         threading.Thread(target=do_quick_grep).start()
         return
 
-    if data.startswith("rb_"):
+    if data == "cancel":
+        send_msg("✅ 回滚操作已取消。")
+        return
+
+    if data.startswith("rb_") or data.startswith("rbcfm_"):
         msg_id_str = data.split("_")[1]
         try:
             with open(HISTORY_FILE, "r") as f: history = json.load(f)
@@ -573,6 +579,15 @@ def handle_callback(cb):
             if not record: raise Exception()
         except:
             send_msg("❌ 历史记录读取失败。")
+            return
+
+        if data.startswith("rb_"):
+            info = f"🕒 {record.get('time')} | 📦 {record.get('size', '未知大小')}"
+            buttons = [
+                [{"text": "✅ 确定回滚 (覆盖当前数据)", "callback_data": f"rbcfm_{msg_id_str}"}],
+                [{"text": "❌ 取消操作", "callback_data": "cancel"}]
+            ]
+            send_msg(f"⚠️ <b>危险操作确认</b>\n您即将回滚到以下快照：\n{info}\n\n<i>此操作将彻底抹除当前 VPS 上的机器人配置和长短期记忆，并且无法撤销！</i>", {"inline_keyboard": buttons})
             return
 
         file_ids = record.get("file_ids", [])
@@ -613,7 +628,7 @@ def handle_callback(cb):
 
 def main():
     set_commands()
-    send_msg("👋 <b>Guardian 守护进程已启动并接管 OpenClaw！</b>\n随时可以使用 /status 检查状态。")
+    send_msg(f"👋 <b>Guardian 守护进程 ({VERSION}) 已启动并接管 OpenClaw！</b>\n随时可以使用 /status 检查状态。")
     threading.Thread(target=health_monitor, daemon=True).start()
     threading.Thread(target=config_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
