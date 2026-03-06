@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.3.4"
+VERSION = "v1.3.5"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -463,7 +463,7 @@ fi
             with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
             os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
     elif text.startswith("/logs"):
-        logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | awk '{print substr(\\$0, 1, 500)}'")[-3500:]
+        logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | awk '{print substr(\$0, 1, 500)}'")[-3500:]
         send_msg(f"📝 <b>最近日志:</b>\n<pre>{logs}</pre>")
     elif text.startswith("/grep"):
         keyword = text[5:].strip()
@@ -481,14 +481,14 @@ fi
         
         def do_grep():
             safe_kw = keyword.replace("'", "'\\''")
-            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 3 次案发现场 (-m 3) 则立刻结束，附带前后 1 行上下文 (-C 1)
-            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\\$0, 1, 500)}}' | grep -m 3 -i -C 1 '{safe_kw}'"
+            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
+            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
             res = run_cmd(grep_cmd).strip()
             if not res:
                 send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
             else:
                 if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                send_msg(f"🚨 <b>[{keyword}] 最近 3 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+                send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
                 
         threading.Thread(target=do_grep).start()
     elif text.startswith("/rollback"):
@@ -516,14 +516,14 @@ def handle_callback(cb):
         
         def do_quick_grep():
             safe_kw = keyword.replace("'", "'\\''")
-            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 3 次案发现场 (-m 3) 则立刻结束，附带前后 1 行上下文 (-C 1)
-            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\\$0, 1, 500)}}' | grep -m 3 -i -C 1 '{safe_kw}'"
+            # 倒序查找 (-r)，强行截断每行前500字符防溢出，一旦搜满最近 5 次案发现场 (-m 5) 则立刻结束，附带前后 1 行上下文 (-C 1)
+            grep_cmd = f"journalctl -u openclaw -r --no-pager | awk '{{print substr(\$0, 1, 500)}}' | grep -m 5 -i -C 1 '{safe_kw}'"
             res = run_cmd(grep_cmd).strip()
             if not res:
                 send_msg(f"✅ 在整个日志历史中未找到与 <code>{keyword}</code> 相关的记录。")
             else:
                 if len(res) > 3500: res = res[:3500] + "\n...(由于 Telegram 限制，超长日志已被截断)..."
-                send_msg(f"🚨 <b>[{keyword}] 最近 3 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
+                send_msg(f"🚨 <b>[{keyword}] 最近 5 次案发现场 (倒序):</b>\n<pre>{res}</pre>")
                 
         threading.Thread(target=do_quick_grep).start()
         return
