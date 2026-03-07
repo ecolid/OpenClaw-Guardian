@@ -1,4 +1,6 @@
-# OpenClaw Guardian 更新日志
+## [v1.4.9] - 2026-03-07
+### 修复定时备份失效 (Fix Cron Backup Failure)
+- **环境隔离适配**: 为定时任务触发的备份脚本强制注入了标准的系统 `PATH` 环境变量。解决了在某些极简 VPS 环境下，Cron 触发任务时因找不到 `jq` 或 `curl` 指令导致的备份沉默失败问题。
 
 ## [v1.4.8] - 2026-03-07
 ### 功能精简与修复 (Bug Fixes & Streamlining)

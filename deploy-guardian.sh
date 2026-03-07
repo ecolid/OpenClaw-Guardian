@@ -103,8 +103,9 @@ log_step "[2/5] 生成核心备份脚本..."
 cat > "$BACKUP_DIR/backup.sh" <<EOF
 #!/usr/bin/env bash
 set -e
+export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 # ================================================
-# OpenClaw Guardian - 增量备份脚本
+# OpenClaw 增量备份脚本 - \$(date)
 # ================================================
 
 BOT_TOKEN="${TG_BOT_TOKEN}"
@@ -300,7 +301,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.8"
+VERSION = "v1.4.9"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
