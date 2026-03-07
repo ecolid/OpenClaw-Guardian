@@ -144,7 +144,7 @@ IN_EOF
 echo "正在打包..."
 # 忽略打包过程中文件被修改(如数据库写入)导致的警告和退出
 # 自动排除图片、视频等大体积多媒体文件，防止 Playwright 截图撑爆备份包
-tar --warning=no-file-changed --exclude="*.png" --exclude="*.jpg" --exclude="*.jpeg" --exclude="*.webp" --exclude="*.mp4" -czf "\${BACKUP_FILE}" config/ restore.sh || true
+tar --warning=no-file-changed --exclude="*.png" --exclude="*.jpg" --exclude="*.jpeg" --exclude="*.webp" --exclude="*.mp4" --exclude="*Cache*" --exclude="*cache*" --exclude="*.log" --exclude="logs" --exclude="*Code Cache*" --exclude="*Crashpad*" -czf "\${BACKUP_FILE}" config/ restore.sh || true
 
 echo "正在处理 Telegram 附件限制 (45MB)..."
 
@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.6"
+VERSION = "v1.4.7"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
