@@ -305,7 +305,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.1"
+VERSION = "v1.5.2"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -484,6 +484,16 @@ def handle_msg(msg):
                         if hist: last_backup_str = hist[0]["time"]
             except: pass
 
+            # Cron Service & Job Check
+            cron_raw = run_cmd("systemctl is-active cron || service cron status").lower()
+            if "active" in cron_raw and "running" in cron_raw or "active" in cron_raw and "is-active" not in cron_raw:
+                cron_status = "🟢 运行良好"
+            else:
+                cron_status = "🔴 服务停滞"
+            
+            cron_job = run_cmd("crontab -l 2>/dev/null | grep 'backup.sh'").strip()
+            cron_job_status = "✅ 已注册" if cron_job else "❌ 未发现任务"
+
             # Dashboard Assembly
             dash = f'''📊 <b>核心引擎状态 (Guardian {VERSION})</b>
 -----------------------------------
@@ -498,6 +508,10 @@ def handle_msg(msg):
 🔄 Swap: {gen_bar(swap_pct)} ({swap_str})
 💽 磁盘: {gen_bar(disk_pct)} ({disk_str})
 🕒 <b>最近备份</b>: <code>{last_backup_str}</code>
+
+<b>[自动化调度中心]</b>
+⏰ <b>Cron 服务</b>: <code>{cron_status}</code>
+📌 <b>定时任务</b>: <code>{cron_job_status}</code>
 </pre>
 -----------------------------------'''
             send_msg(dash)
