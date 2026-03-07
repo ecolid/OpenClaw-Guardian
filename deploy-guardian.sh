@@ -110,6 +110,8 @@ export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 BOT_TOKEN="${TG_BOT_TOKEN}"
 CHAT_ID="${TG_CHAT_ID}"
+echo "-----------------------------------" >> "$BACKUP_DIR/cron_backup.log"
+echo "🚀 备份脚本启动 (\$(date))" >> "$BACKUP_DIR/cron_backup.log"
 TIMESTAMP=\$(date +"%Y%m%d_%H%M%S")
 HOSTNAME=\$(hostname)
 TMP_DIR="/tmp/oc_backup_\${TIMESTAMP}"
@@ -228,6 +230,8 @@ jq -c \\
    '. = [{time: \$time, file: \$file, msg_id: \$msg_id, file_ids: \$file_ids, size: \$size}] + . | .[0:30]' \\
    "\${HISTORY_FILE}" > "\${HISTORY_FILE}.tmp" && mv "\${HISTORY_FILE}.tmp" "\${HISTORY_FILE}"
 
+echo "✅ 备份成功并记录历史 (\$(date))" >> "$BACKUP_DIR/cron_backup.log"
+
 rm -rf "\${TMP_DIR}"
 echo "清理完毕。"
 EOF
@@ -301,7 +305,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.9"
+VERSION = "v1.5.0"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -464,12 +468,21 @@ def handle_msg(msg):
                 swap_str = f"{(swap_used/1024):.1f}G/{(swap_tot/1024):.1f}G"
             except: swap_pct, swap_str = 0.0, "0G/0G"
 
-            # Disk
+            # Disk & Last Backup
             df_out = run_cmd("df -h / | awk 'NR==2{print \$5, \$3, \$4}'").strip().split()
             try:
                 disk_pct = float(df_out[0].replace('%', ''))
                 disk_str = f"用{df_out[1]}/剩{df_out[2]}"
             except: disk_pct, disk_str = 0.0, "?/?"
+
+            # Read last backup from JSON
+            last_backup_str = "从未备份"
+            try:
+                if os.path.exists(HISTORY_FILE):
+                    with open(HISTORY_FILE, "r") as f:
+                        hist = json.load(f)
+                        if hist: last_backup_str = hist[0]["time"]
+            except: pass
 
             # Dashboard Assembly
             dash = f'''📊 <b>核心引擎状态 (Guardian {VERSION})</b>
@@ -484,6 +497,7 @@ def handle_msg(msg):
 🐏 内存: {gen_bar(mem_pct)} ({mem_str})
 🔄 Swap: {gen_bar(swap_pct)} ({swap_str})
 💽 磁盘: {gen_bar(disk_pct)} ({disk_str})
+🕒 <b>最近备份</b>: <code>{last_backup_str}</code>
 </pre>
 -----------------------------------'''
             send_msg(dash)
@@ -720,8 +734,8 @@ systemctl disable sysmonitor 2>/dev/null || true
 
 systemctl restart openclaw-guardian
 
-# 每 4 小时执行一次备份
-CRON_CMD="0 */4 * * * $BACKUP_DIR/backup.sh >/dev/null 2>&1"
+# 每 4 小时执行一次备份 (重定向日志以供排错)
+CRON_CMD="0 */4 * * * $BACKUP_DIR/backup.sh >> $BACKUP_DIR/cron_backup.log 2>&1"
 (crontab -l 2>/dev/null | grep -v "$BACKUP_DIR/backup.sh" || true; echo "$CRON_CMD") | crontab -
 
 echo ""
