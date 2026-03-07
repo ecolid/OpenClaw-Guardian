@@ -300,7 +300,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.4.7"
+VERSION = "v1.4.8"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -385,40 +385,6 @@ def health_monitor():
         except: pass
         time.sleep(3)
 
-def config_monitor():
-    """防抖监听配置改动自动备份"""
-    os.makedirs("/root/.openclaw/agents", exist_ok=True)
-    cmd = "inotifywait -m -e modify,create,delete /root/.openclaw/openclaw.json /root/.openclaw/agents/ 2>/dev/null"
-    
-    last_backup_time = 0
-    pending_timer = None
-    lock = threading.Lock()
-    
-    def do_backup_task():
-        nonlocal last_backup_time, pending_timer
-        with lock: pending_timer = None
-        send_msg("👀 检测到配置修改并已度过冷却期，正在执行后台增量备份...")
-        run_cmd(f"{BACKUP_DIR}/backup.sh")
-        with lock: last_backup_time = time.time()
-
-    while True:
-        proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        while proc.poll() is None:
-            line = proc.stdout.readline()
-            if not line:
-                time.sleep(1)
-                continue
-            now = time.time()
-            with lock:
-                if pending_timer is None:
-                    wait_time = 15 
-                    if now - last_backup_time < 300:
-                        wait_time = 300 - (now - last_backup_time) + 5
-                    pending_timer = threading.Timer(wait_time, do_backup_task)
-                    pending_timer.start()
-                    if wait_time > 20: 
-                        send_msg(f"👀 收到改动通知（当前在备份冷却期），已排期于 {int(wait_time)} 秒后合并备份。")
-        time.sleep(2)
 def ota_monitor():
     """后台轮询 GitHub 检查更新"""
     notified_version = VERSION
@@ -443,6 +409,7 @@ def set_commands():
         {"command": "status", "description": "查看服务器状态与内存占用"},
         {"command": "backup", "description": "立即全量备份机器人配置"},
         {"command": "rollback", "description": "一键回滚到历史快照"},
+        {"command": "restart", "description": "重启机器人的后端进程"},
         {"command": "logs", "description": "查看最近的报错日志"},
         {"command": "grep", "description": "定向搜索日志并提取上下文 (如 /grep 400)"},
         {"command": "update", "description": "从 GitHub 热更新守护程序代码"},
@@ -700,7 +667,6 @@ def main():
     set_commands()
     send_msg(f"👋 <b>Guardian 守护进程 ({VERSION}) 已启动并接管 OpenClaw！</b>\n随时可以使用 /status 检查状态。")
     threading.Thread(target=health_monitor, daemon=True).start()
-    threading.Thread(target=config_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
     try:
         r = requests.get(f"{API_URL}/getUpdates", timeout=5).json()
@@ -764,7 +730,7 @@ echo -e "${CYAN}================================================================
 echo -e "${YELLOW}📌 关键功能${PLAIN}"
 echo "  - 常驻守护: 你的 Telegram Bot 现在全天 24 小时在线"
 echo "  - 双层监控: journalctl 实时流 + 60s 兜底轮询"
-echo "  - 修改防抖: 配置文件发生改动时，自动倒计时合并备份"
+echo "  - 增量备份: 每 4 小时自动备份一次 OpenClaw 核心数据"
 echo ""
 echo -e "${YELLOW}🛠️ Telegram 命令列表${PLAIN}"
 echo "  /status   - 查看系统和 OpenClaw 状态"
