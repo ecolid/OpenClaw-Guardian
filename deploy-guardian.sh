@@ -305,7 +305,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.0"
+VERSION = "v1.5.1"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -415,7 +415,7 @@ def set_commands():
         {"command": "backup", "description": "立即全量备份机器人配置"},
         {"command": "rollback", "description": "一键回滚到历史快照"},
         {"command": "restart", "description": "重启机器人的后端进程"},
-        {"command": "logs", "description": "查看最近的报错日志"},
+        {"command": "logs", "description": "日志中心：查看业务日志或备份自检日志"},
         {"command": "grep", "description": "定向搜索日志并提取上下文 (如 /grep 400)"},
         {"command": "update", "description": "从 GitHub 热更新守护程序代码"},
         {"command": "update_rollback", "description": "恢复上一版本的守护程序代码"}
@@ -536,8 +536,20 @@ fi
             with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
             os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
     elif text.startswith("/logs"):
-        logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | awk '{print substr(\$0, 1, 500)}'")[-3500:]
-        send_msg(f"📝 <b>最近日志:</b>\n<pre>{html.escape(logs)}</pre>")
+        cmd_parts = text.split()
+        if len(cmd_parts) > 1 and cmd_parts[1].lower() == "cron":
+            log_path = os.path.join(BACKUP_DIR, "cron_backup.log")
+            if os.path.exists(log_path):
+                logs = run_cmd(f"tail -n 30 {log_path}")[-3500:]
+                send_msg(f"� <b>Cron 备份自检日志 (最近 30 行):</b>\n<pre>{html.escape(logs)}</pre>")
+            else:
+                send_msg("❌ 备份日志尚未生成 (Cron 定时任务可能尚未触发)。")
+        else:
+            buttons = [
+                [{"text": "🧵 OpenClaw 业务日志", "callback_data": "log_oc"}],
+                [{"text": "🕒 Cron 备份自检日志", "callback_data": "log_cron"}]
+            ]
+            send_msg("📄 <b>日志查询中心</b>\n请选择您要查阅的日志类型：", {"inline_keyboard": buttons})
     elif text.startswith("/grep"):
         keyword = text[5:].strip()
         if not keyword:
@@ -588,6 +600,14 @@ def handle_callback(cb):
     if str(cb["message"]["chat"]["id"]) != CHAT_ID: return
     try: requests.post(f"{API_URL}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
     except: pass
+    
+    if data == "log_oc":
+        logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | awk '{print substr(\$0, 1, 500)}'")[-3500:]
+        send_msg(f"🧵 <b>OpenClaw 业务日志 (最近 20 行):</b>\n<pre>{html.escape(logs)}</pre>")
+        return
+    if data == "log_cron":
+        handle_msg({"text": "/logs cron", "chat": {"id": CHAT_ID}})
+        return
     
     if data == "ota_update":
         handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
