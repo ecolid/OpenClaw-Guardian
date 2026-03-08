@@ -328,7 +328,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.0"
+VERSION = "v1.8.1"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -566,7 +566,7 @@ def thinking_monitor():
                     threading.Thread(target=typing_loop, daemon=True).start()
                     def live_ticker():
                         while is_thinking:
-                            update_think_msg(); time.sleep(1.5)
+                            update_think_msg(); time.sleep(0.5)
                     threading.Thread(target=live_ticker, daemon=True).start()
 
                 # --- 实时采集单次会话的数据 ---
@@ -867,7 +867,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.0"
+VERSION = "v1.8.1"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -1105,7 +1105,7 @@ def thinking_monitor():
                     threading.Thread(target=typing_loop, daemon=True).start()
                     def live_ticker():
                         while is_thinking:
-                            update_think_msg(); time.sleep(1.5)
+                            update_think_msg(); time.sleep(0.5)
                     threading.Thread(target=live_ticker, daemon=True).start()
 
                 # --- 实时采集单次会话的数据 ---
