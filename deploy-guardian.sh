@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.5"
+VERSION="v1.9.6"
 set -e
 
 # =================================================================
@@ -334,7 +334,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.5"
+VERSION = "v1.9.6"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -352,7 +352,7 @@ TOOL_MAP = {
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
 
-# --- 全局会话状态 (v1.9.5 重购) ---
+# --- 全局会话状态 (v1.9.6 加固) ---
 is_thinking = False
 think_start_time = 0
 think_msg_id = None
@@ -414,8 +414,8 @@ def save_stats(s):
         with open(STATS_FILE, "w") as f: json.dump(s, f)
     except: pass
 
-def send_msg(text, reply_markup=None):
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+def send_msg(text, reply_markup=None, disable_notification=False):
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_notification": disable_notification}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     try: requests.post(f"{API_URL}/sendMessage", json=payload, timeout=10)
     except: pass
@@ -590,6 +590,13 @@ def thinking_monitor():
                 session_error = state.get("error")
             os.remove(RESUME_FILE) # 仅恢复一次
             send_msg("🔄 <b>小龙虾无感重启完成</b>: 已成功找回之前的思考进度，继续监听日志...", disable_notification=True)
+            
+            # [Fix v1.9.6] 重启后立刻恢复动画和输入状态
+            threading.Thread(target=typing_loop, daemon=True).start()
+            def live_ticker():
+                while is_thinking:
+                    update_think_msg(); time.sleep(1.0)
+            threading.Thread(target=live_ticker, daemon=True).start()
         except: pass
 
     def typing_loop():
