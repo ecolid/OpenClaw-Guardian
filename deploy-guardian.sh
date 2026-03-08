@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.4"
+VERSION="v1.9.5"
 set -e
 
 # =================================================================
@@ -332,9 +332,10 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.4"
+VERSION = "v1.9.5"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
+STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
 
 TOOL_MAP = {
     "web_search": "搜索", 
@@ -348,11 +349,20 @@ TOOL_MAP = {
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
+
+# --- 全局会话状态 (v1.9.5 重购) ---
 is_thinking = False
 think_start_time = 0
 think_msg_id = None
 last_shown_time = 0
-STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
+session_chars = 0
+session_folds = 0
+session_tools = {}
+session_scale = 0
+session_error = None
+session_media_saved = 0.0
+session_wait_ms = 0
+session_warn = False
 
 def load_stats():
     today = time.strftime("%Y-%m-%d")
@@ -425,7 +435,79 @@ def gen_bar(pct, length=10):
     else: icon = "🔴"
     return f"{icon} [{bar}] {p: >4.1f}%"
 
-# --- 监控逻辑 ---
+def save_resume_state():
+    """将当前思考状态固化至磁盘，用于无损热更新"""
+    if not is_thinking or not think_msg_id: return
+    try:
+        with open(RESUME_FILE, "w") as f:
+            json.dump({
+                "msg_id": think_msg_id, "start_ts": think_start_time,
+                "chars": session_chars, "folds": session_folds,
+                "tools": session_tools, "scale": session_scale,
+                "media": session_media_saved, "wait": session_wait_ms,
+                "warn": session_warn, "error": session_error
+            }, f)
+    except: pass
+
+def update_think_msg(final=False):
+    """更新 Telegram 上的思考回执消息"""
+    global think_msg_id, last_shown_time, is_thinking
+    if not think_msg_id: return
+    now_ts = time.time()
+    elapsed = int(now_ts - think_start_time)
+    delta = elapsed - last_shown_time
+    
+    if final:
+        s = load_stats()
+        total_convs = s.get("total_convs", 0)
+        total_seconds = s.get("total_thinking_seconds", 0)
+        avg = total_seconds / max(1, total_convs)
+        diff = elapsed - avg
+        if abs(diff) < 0.5: diff_info = " (⚖️ 持平)"
+        else: diff_info = f" ({'-' if diff < 0 else '+'}{abs(diff):.1f}s)"
+        perf_icon = "📈" if diff <= 0.5 else "📉"
+        
+        fold_str = f"\n♻️ 记忆折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
+        
+        # 工具明细渲染 (Live Fields)
+        tool_items = []
+        for k, v in session_tools.items():
+            name = TOOL_MAP.get(k, k)
+            tool_items.append(f"{name}:{v}")
+        tool_str = f"\n🛠️ {' | '.join(tool_items)}" if tool_items else ""
+        
+        scale_str = f" (规模: <code>{session_scale/1000:.1f}k</code>)" if session_scale > 0 else ""
+        media_str = f"\n🖼️ 媒体优化: 节省 <code>{session_media_saved:.2f}MB</code>" if session_media_saved > 0.01 else ""
+        err_str = f"\n🚨 异常: <code>{session_error}</code>" if session_error else ""
+        wait_str = f" | ⏱️ 排队: <code>{session_wait_ms/1000:.1f}s</code>" if session_wait_ms > 50 else ""
+        warn_str = f"\n⚠️ 内容过长已截断" if session_warn else ""
+        
+        text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s{wait_str} {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{scale_str}{media_str}{tool_str}{fold_str}{err_str}{warn_str}"
+        if os.path.exists(RESUME_FILE): os.remove(RESUME_FILE) # 正常结束清除存档
+    else:
+        # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
+        moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
+        icon = moons[int(time.time() * 2) % len(moons)]
+        
+        tool_items = []
+        for k, v in session_tools.items():
+            name = TOOL_MAP.get(k, k)
+            tool_items.append(f"{name}:{v}")
+        tool_live = f" | 🛠️ {' '.join(tool_items)}" if tool_items else ""
+        err_live = " | 🚨 有异常" if session_error else ""
+        
+        inc_str = f" (+{delta}s)" if delta > 0 else ""
+        text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{tool_live}{err_live}"
+    
+    try:
+        resp = requests.post(f"{API_URL}/editMessageText", json={
+            "chat_id": CHAT_ID, "message_id": think_msg_id, "text": text, "parse_mode": "HTML"
+        }, timeout=5).json()
+        if resp.get("ok"): last_shown_time = elapsed
+        if final:
+            think_msg_id = None
+    except: pass
+
 def health_monitor():
     """双通道状态机监控: 实时流(快速通道) + 轮询(兜底)"""
     was_down = False
@@ -484,15 +566,8 @@ def health_monitor():
 
 def thinking_monitor():
     """实时追踪 OpenClaw 思考状态并同步到 Telegram"""
-    global is_thinking, think_start_time, think_msg_id
-    session_chars = 0
-    session_folds = 0
-    session_tools = {} # 动态工具映射 e.g. {"web_search": 1}
-    session_scale = 0
-    session_error = None
-    session_media_saved = 0.0 # MB
-    session_wait_ms = 0
-    session_warn = None
+    global is_thinking, think_start_time, think_msg_id, last_shown_time
+    global session_chars, session_folds, session_tools, session_scale, session_error, session_media_saved, session_wait_ms, session_warn
 
     # --- 无损续传加载逻辑 ---
     if os.path.exists(RESUME_FILE):
@@ -503,7 +578,8 @@ def thinking_monitor():
                 think_msg_id = state.get("msg_id")
                 think_start_time = state.get("start_ts")
                 session_chars = state.get("chars", 0)
-                session_folds = state.get("folds", 0)
+                session_folds = state.get("fold", 0) # 兼容性处理
+                if "folds" in state: session_folds = state["folds"]
                 session_tools = state.get("tools", {})
                 session_scale = state.get("scale", 0)
                 session_media_saved = state.get("media", 0.0)
@@ -512,78 +588,6 @@ def thinking_monitor():
                 session_error = state.get("error")
             os.remove(RESUME_FILE) # 仅恢复一次
             send_msg("🔄 <b>小龙虾无感重启完成</b>: 已成功找回之前的思考进度，继续监听日志...", disable_notification=True)
-        except: pass
-
-    def save_resume_state():
-        if not is_thinking or not think_msg_id: return
-        try:
-            with open(RESUME_FILE, "w") as f:
-                json.dump({
-                    "msg_id": think_msg_id, "start_ts": think_start_time,
-                    "chars": session_chars, "folds": session_folds,
-                    "tools": session_tools, "scale": session_scale,
-                    "media": session_media_saved, "wait": session_wait_ms,
-                    "warn": session_warn, "error": session_error
-                }, f)
-        except: pass
-    
-    def update_think_msg(final=False):
-        global think_msg_id, last_shown_time
-        if not think_msg_id: return
-        now_ts = time.time()
-        elapsed = int(now_ts - think_start_time)
-        delta = elapsed - last_shown_time
-        
-        if final:
-            s = load_stats()
-            total_convs = s.get("total_convs", 0)
-            total_seconds = s.get("total_thinking_seconds", 0)
-            avg = total_seconds / max(1, total_convs)
-            diff = elapsed - avg
-            if abs(diff) < 0.5: diff_info = " (⚖️ 持平)"
-            else: diff_info = f" ({'-' if diff < 0 else '+'}{abs(diff):.1f}s)"
-            perf_icon = "📈" if diff <= 0.5 else "📉"
-            
-            fold_str = f"\n♻️ 记忆折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
-            
-            # 工具明细渲染 (Live Fields)
-            tool_items = []
-            for k, v in session_tools.items():
-                name = TOOL_MAP.get(k, k)
-                tool_items.append(f"{name}:{v}")
-            tool_str = f"\n🛠️ {' | '.join(tool_items)}" if tool_items else ""
-            
-            scale_str = f" (规模: <code>{session_scale/1000:.1f}k</code>)" if session_scale > 0 else ""
-            media_str = f"\n🖼️ 媒体优化: 节省 <code>{session_media_saved:.2f}MB</code>" if session_media_saved > 0.01 else ""
-            err_str = f"\n🚨 异常: <code>{session_error}</code>" if session_error else ""
-            wait_str = f" | ⏱️ 排队: <code>{session_wait_ms/1000:.1f}s</code>" if session_wait_ms > 50 else ""
-            warn_str = f"\n⚠️ 内容过长已截断" if session_warn else ""
-            
-            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s{wait_str} {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{scale_str}{media_str}{tool_str}{fold_str}{err_str}{warn_str}"
-            if os.path.exists(RESUME_FILE): os.remove(RESUME_FILE) # 正常结束清除存档
-        else:
-            # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
-            moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
-            icon = moons[int(time.time() * 2) % len(moons)]
-            
-            tool_items = []
-            for k, v in session_tools.items():
-                name = TOOL_MAP.get(k, k)
-                tool_items.append(f"{name}:{v}")
-            tool_live = f" | 🛠️ {' '.join(tool_items)}" if tool_items else ""
-            err_live = " | 🚨 有异常" if session_error else ""
-            
-            inc_str = f" (+{delta}s)" if delta > 0 else ""
-            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{tool_live}{err_live}"
-        
-        try:
-            resp = requests.post(f"{API_URL}/editMessageText", json={
-                "chat_id": CHAT_ID, "message_id": think_msg_id, "text": text, "parse_mode": "HTML"
-            }, timeout=5).json()
-            if resp.get("ok"): last_shown_time = elapsed
-            if final:
-                # v1.8.6: 取消自动删除，让消息作为“对话回执”永久保留
-                think_msg_id = None
         except: pass
 
     def typing_loop():
