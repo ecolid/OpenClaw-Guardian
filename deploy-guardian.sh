@@ -243,7 +243,7 @@ METADATA_PKG="\${TMP_DIR}/Guardian_Sync_\${TIMESTAMP}.tar.gz"
 STATS_FILE="\$BACKUP_DIR/stats.json"
 
 # 打包索引与统计
-tar -czf "\${METADATA_PKG}" -C "\$BACKUP_DIR" backup-history.json stats.json 2>/dev/null || true
+tar -czf "\${METADATA_PKG}" -C "$BACKUP_DIR" backup-history.json stats.json 2>/dev/null || true
 
 if [ -f "\${METADATA_PKG}" ]; then
     curl --max-time 30 -X POST "https://api.telegram.org/bot\${BOT_TOKEN}/sendDocument" \\
@@ -323,13 +323,13 @@ chmod +x "$BACKUP_DIR/restore.sh"
 log_step "[4/5] 生成 Guardian Bot..."
 
 cat > "$BACKUP_DIR/guardian-bot.py" <<EOF
-import requests, time, subprocess, json, os, threading, html
+import requests, time, subprocess, json, os, threading, html, re
 
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.6.0"
+VERSION = "v1.6.1"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -491,19 +491,17 @@ def thinking_monitor():
                         is_thinking = False
                         update_think_msg(final=True)
                 
-                # --- [Stats Logic 1.5.8] ---
+                # --- [Stats Logic 1.5.8/1.6.1] ---
                 if 'pre-prompt:' in line_str and 'promptChars=' in line_str:
                     try:
-                        import re
-                        pc = int(re.search(r'promptChars=(\d+)', line_str).group(1))
+                        pc = int(re.search(r'promptChars=(\\d+)', line_str).group(1))
                         s = load_stats(); s['total_prompt_chars'] += pc; s['today_prompt_chars'] += pc
                         s['total_convs'] += 1; s['today_convs'] += 1
                         save_stats(s)
                     except: pass
                 if 'compactionSummary:' in line_str:
                     try:
-                        import re
-                        fc = int(re.search(r'compactionSummary:(\d+)', line_str).group(1))
+                        fc = int(re.search(r'compactionSummary:(\\d+)', line_str).group(1))
                         s = load_stats(); s['total_folds'] += fc; s['today_folds'] += fc
                         save_stats(s)
                     except: pass
@@ -549,9 +547,7 @@ def handle_msg(msg):
     text = msg["text"]
     if str(msg["chat"]["id"]) != CHAT_ID: return
 
-    if text.startswith("/status"):
-        send_msg("⏳ 正在采集硬件深层指标，请稍候...")
-    elif text.startswith("/stats"):
+    if text.startswith("/stats"):
         s = load_stats()
         avg_total = s['total_prompt_chars'] / s['total_convs'] if s['total_convs'] else 0
         avg_today = s['today_prompt_chars'] / s['today_convs'] if s['today_convs'] else 0
@@ -574,6 +570,9 @@ def handle_msg(msg):
         return
 
     if text.startswith("/status"):
+        send_msg("⏳ 正在采集硬件深层指标，请稍候...")
+        try:
+            # Service Status
             oc_status = run_cmd("systemctl is-active openclaw").strip().upper()
             oc_emoji = "🟢" if oc_status == "ACTIVE" else "🔴"
             oc_uptime = run_cmd("systemctl show openclaw --property=ActiveEnterTimestamp | awk -F= '{print \$2}'").strip()
@@ -587,17 +586,13 @@ def handle_msg(msg):
                 except: oc_time_str = "运行时间未知"
             else: oc_time_str = "已停止"
 
-            # Host Uptime & Load
             uptime = run_cmd("uptime -p").strip().replace("up ", "")
             load = run_cmd("cat /proc/loadavg | awk '{print \$1, \"|\", \$2, \"|\", \$3}'").strip()
-            
-            # CPU
             cpu_idle = run_cmd("top -bn1 | grep 'Cpu(s)' | awk '{print \$8}'").strip()
             try: cpu_pct = 100.0 - float(cpu_idle)
             except: cpu_pct = 0.0
             
-            # Memory & Swap
-            free_out = run_cmd("free -m | awk 'NR==2{print \$3, \$2}; NR==3{print \$3, \$2}'").strip().split('\n')
+            free_out = run_cmd("free -m | awk 'NR==2{print \$3, \$2}; NR==3{print \$3, \$2}'").strip().split('\\n')
             try:
                 mem_used, mem_tot = map(int, free_out[0].split())
                 mem_pct = (mem_used / mem_tot) * 100 if mem_tot else 0
@@ -610,14 +605,12 @@ def handle_msg(msg):
                 swap_str = f"{(swap_used/1024):.1f}G/{(swap_tot/1024):.1f}G"
             except: swap_pct, swap_str = 0.0, "0G/0G"
 
-            # Disk & Last Backup
             df_out = run_cmd("df -h / | awk 'NR==2{print \$5, \$3, \$4}'").strip().split()
             try:
                 disk_pct = float(df_out[0].replace('%', ''))
                 disk_str = f"用{df_out[1]}/剩{df_out[2]}"
             except: disk_pct, disk_str = 0.0, "?/?"
 
-            # Read last backup from JSON
             last_backup_str = "从未备份"
             try:
                 if os.path.exists(HISTORY_FILE):
@@ -626,17 +619,11 @@ def handle_msg(msg):
                         if hist: last_backup_str = hist[0]["time"]
             except: pass
 
-            # Cron Service & Job Check
             cron_raw = run_cmd("systemctl is-active cron || service cron status").lower()
-            if "active" in cron_raw and "running" in cron_raw or "active" in cron_raw and "is-active" not in cron_raw:
-                cron_status = "🟢 运行良好"
-            else:
-                cron_status = "🔴 服务停滞"
-            
+            cron_status = "🟢 运行良好" if ("active" in cron_raw and "running" in cron_raw) else "🔴 服务停滞"
             cron_job = run_cmd("crontab -l 2>/dev/null | grep 'backup.sh'").strip()
             cron_job_status = "✅ 已注册" if cron_job else "❌ 未发现任务"
 
-            # Predict Next Backup (every 4h: 0, 4, 8, 12, 16, 20)
             try:
                 now_h = time.localtime().tm_hour
                 next_h = ((now_h // 4) + 1) * 4
@@ -644,14 +631,12 @@ def handle_msg(msg):
                 next_backup_time = f"{next_h:02d}:00"
             except: next_backup_time = "计算中..."
 
-            # Think Status Header
             if is_thinking:
                 think_elapsed = int(time.time() - think_start_time)
                 status_header = f"🦞 <b>小龙虾状态</b>: 🧠 思考中... (<code>{think_elapsed}s</code>)"
             else:
                 status_header = f"🦞 <b>小龙虾状态</b>: 💤 空闲待命"
 
-            # Dashboard Assembly
             dash = f'''📊 <b>核心引擎状态 (Guardian {VERSION})</b>
 -----------------------------------
 {status_header}
@@ -668,9 +653,9 @@ def handle_msg(msg):
 🕒 <b>最近备份</b>: <code>{last_backup_str}</code>
 
 <b>[自动化调度中心]</b>
-⏰ <b>Cron 服务</b>: <code>{cron_status}</code>
-📌 <b>定时任务</b>: <code>{cron_job_status}</code>
-⏭️ <b>下次预定</b>: <code>今天 {next_backup_time}</code>
+⏰ <b>Cron 服务</b>: {cron_status}
+📌 <b>定时任务</b>: {cron_job_status}
+⏭️ <b>下次预定</b>: 今天 {next_backup_time}
 </pre>
 -----------------------------------'''
             send_msg(dash)
