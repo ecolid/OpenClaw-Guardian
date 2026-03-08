@@ -328,7 +328,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.3"
+VERSION = "v1.7.5"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -349,7 +349,7 @@ def load_stats():
                     s.update({"today_prompt_chars": 0, "today_convs": 0, "today_folds": 0, "last_reset_date": today})
                 return s
         except: pass
-    return {"total_prompt_chars": 0, "today_prompt_chars": 0, "total_convs": 0, "today_convs": 0, "total_folds": 0, "today_folds": 0, "last_reset_date": today}
+    return {"total_prompt_chars": 0, "today_prompt_chars": 0, "total_convs": 0, "today_convs": 0, "total_folds": 0, "today_folds": 0, "total_thinking_seconds": 0, "last_reset_date": today}
 
 def load_schedule():
     default = {"hours": [3, 7, 11, 15, 19, 23], "label": "每 4 小时 (错峰)"}
@@ -481,8 +481,17 @@ def thinking_monitor():
         delta = elapsed - last_shown_time
         
         if final:
+            s = load_stats()
+            total_convs = s.get("total_convs", 0)
+            total_seconds = s.get("total_thinking_seconds", 0)
+            avg = total_seconds / total_convs if total_convs > 0 else elapsed
+            diff = elapsed - avg
+            if abs(diff) < 0.5: diff_info = " (⚖️ 持平)"
+            else: diff_info = f" ({'-' if diff < 0 else '+'}{abs(diff):.1f}s)"
+            perf_icon = "📈" if diff <= 0.5 else "📉"
+            
             fold_str = f"\n♻️ 上下文折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
-            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code> 秒\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
+            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
         else:
             # 🕺 律动感更强的 Emoji 序列
             icons = ["🧠", "💭", "⚡", "✨", "🛰️", "⚙️", "⏳", "📡"]
@@ -570,6 +579,10 @@ def thinking_monitor():
                 if 'new=idle' in line_str and 'run_completed' in line_str:
                     if is_thinking:
                         is_thinking = False
+                        final_elapsed = time.time() - think_start_time
+                        s = load_stats()
+                        s["total_thinking_seconds"] = s.get("total_thinking_seconds", 0) + final_elapsed
+                        save_stats(s)
                         update_think_msg(final=True)
                 
                 # --- [Stats Logic 1.5.8/1.6.1] ---
@@ -638,6 +651,7 @@ def handle_msg(msg):
         s = load_stats()
         avg_total = s['total_prompt_chars'] / s['total_convs'] if s['total_convs'] else 0
         avg_today = s['today_prompt_chars'] / s['today_convs'] if s['today_convs'] else 0
+        avg_time = s.get('total_thinking_seconds', 0) / s['total_convs'] if s['total_convs'] else 0
         dash = f'''📊 <b>小龙虾数据看板 (Stats Center)</b>
 -----------------------------------
 📅 <b>今日统计 (Today)</b>
@@ -649,8 +663,8 @@ def handle_msg(msg):
 🌎 <b>历史累计 (Total)</b>
 - 总对话数: <code>{s['total_convs']}</code> 次
 - 总字符数: <code>{s['total_prompt_chars']}</code> Chars
-- 总折叠数: <code>{s['total_folds']}</code> 次
 - 平均规模: <code>{avg_total:.1f}</code> 字/次
+- 平均响应: <code>{avg_time:.1f}</code> 秒
 -----------------------------------
 <i>注: 字符数包含提示词与上下文，反映 API 消耗强度。</i>'''
         send_msg(dash)
@@ -838,7 +852,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.3"
+VERSION = "v1.7.5"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -859,7 +873,7 @@ def load_stats():
                     s.update({"today_prompt_chars": 0, "today_convs": 0, "today_folds": 0, "last_reset_date": today})
                 return s
         except: pass
-    return {"total_prompt_chars": 0, "today_prompt_chars": 0, "total_convs": 0, "today_convs": 0, "total_folds": 0, "today_folds": 0, "last_reset_date": today}
+    return {"total_prompt_chars": 0, "today_prompt_chars": 0, "total_convs": 0, "today_convs": 0, "total_folds": 0, "today_folds": 0, "total_thinking_seconds": 0, "last_reset_date": today}
 
 def load_schedule():
     default = {"hours": [3, 7, 11, 15, 19, 23], "label": "每 4 小时 (错峰)"}
@@ -991,8 +1005,17 @@ def thinking_monitor():
         delta = elapsed - last_shown_time
         
         if final:
+            s = load_stats()
+            total_convs = s.get("total_convs", 0)
+            total_seconds = s.get("total_thinking_seconds", 0)
+            avg = total_seconds / max(1, total_convs)
+            diff = elapsed - avg
+            if abs(diff) < 0.5: diff_info = " (⚖️ 持平)"
+            else: diff_info = f" ({'-' if diff < 0 else '+'}{abs(diff):.1f}s)"
+            perf_icon = "📈" if diff <= 0.5 else "📉"
+            
             fold_str = f"\n♻️ 上下文折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
-            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code> 秒\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
+            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
         else:
             # 🕺 律动感更强的 Emoji 序列
             icons = ["🧠", "💭", "⚡", "✨", "🛰️", "⚙️", "⏳", "📡"]
@@ -1080,6 +1103,10 @@ def thinking_monitor():
                 if 'new=idle' in line_str and 'run_completed' in line_str:
                     if is_thinking:
                         is_thinking = False
+                        final_elapsed = time.time() - think_start_time
+                        s = load_stats()
+                        s["total_thinking_seconds"] = s.get("total_thinking_seconds", 0) + final_elapsed
+                        save_stats(s)
                         update_think_msg(final=True)
                 
                 # --- [Stats Logic 1.5.8/1.6.1] ---
@@ -1148,6 +1175,7 @@ def handle_msg(msg):
         s = load_stats()
         avg_total = s['total_prompt_chars'] / s['total_convs'] if s['total_convs'] else 0
         avg_today = s['today_prompt_chars'] / s['today_convs'] if s['today_convs'] else 0
+        avg_time = s.get('total_thinking_seconds', 0) / s['total_convs'] if s['total_convs'] else 0
         dash = f'''📊 <b>小龙虾数据看板 (Stats Center)</b>
 -----------------------------------
 📅 <b>今日统计 (Today)</b>
@@ -1159,8 +1187,8 @@ def handle_msg(msg):
 🌎 <b>历史累计 (Total)</b>
 - 总对话数: <code>{s['total_convs']}</code> 次
 - 总字符数: <code>{s['total_prompt_chars']}</code> Chars
-- 总折叠数: <code>{s['total_folds']}</code> 次
 - 平均规模: <code>{avg_total:.1f}</code> 字/次
+- 平均响应: <code>{avg_time:.1f}</code> 秒
 -----------------------------------
 <i>注: 字符数包含提示词与上下文，反映 API 消耗强度。</i>'''
         send_msg(dash)
