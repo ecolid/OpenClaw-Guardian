@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.3"
+VERSION="v1.9.4"
 set -e
 
 # =================================================================
@@ -332,7 +332,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.3"
+VERSION = "v1.9.4"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 
@@ -348,7 +348,6 @@ TOOL_MAP = {
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
-ota_pending_final = False # 提示线程安全结束当前的思考会话
 is_thinking = False
 think_start_time = 0
 think_msg_id = None
@@ -631,12 +630,6 @@ def thinking_monitor():
 
             proc = subprocess.Popen("journalctl -f -u openclaw -n 0 --no-pager", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             while proc.poll() is None:
-                # --- OTA 强行截断并固化 (Case B) ---
-                if ota_pending_final and is_thinking:
-                    update_think_msg(final=True)
-                    is_thinking = False
-                    break
-
                 line = proc.stdout.readline()
                 if not line: break
                 line_str = line.decode("utf-8", errors="ignore").strip()
@@ -1075,25 +1068,8 @@ fi
         with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
         os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
 
-    def safe_ota_thread():
-        global ota_pending_final
-        wait_start = time.time()
-        send_msg("⏳ <b>检测到小龙虾正在思考</b>\n已为您开启更新排队，将在本轮对话结束或 10 分钟后强制执行（此时将自动固化当前进度）。")
-        while is_thinking and (time.time() - wait_start < 600):
-            time.sleep(5)
-        
-        if is_thinking:
-            send_msg("🚨 <b>等候超时 (10min)</b>: 启动无感热更新... 进度已固化，新版将立刻接管。")
-            ota_pending_final = True
-            while is_thinking: time.sleep(1) # 等待 monitor 线程完成 Finalize
-        
-        perform_ota()
-
     if data == "ota_confirm" or data.startswith("ota_direct:"):
-        if is_thinking:
-            threading.Thread(target=safe_ota_thread).start()
-        else:
-            perform_ota()
+        perform_ota()
         return
         
     if data.startswith("qg_"):
