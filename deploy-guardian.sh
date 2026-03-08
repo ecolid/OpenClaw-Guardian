@@ -7,9 +7,11 @@ set -e
 # GitHub: https://github.com/ecolid/openclaw-guardian
 # 
 # 功能: 
-# 1. 常驻 Telegram Bot，支持 /backup, /rollback, /status, /restart, /logs
-# 2. 定时备份 (默认每 4 小时) 和 修改防抖备份
-# 3. 状态机监控 (实时流发现异常 + 60s 兜底轮询)
+# 1. 常驻 Telegram Bot，支持 /stats, /backup, /rollback, /status, /update
+# 2. “活字段”实时回执 (Live Metrics): 动态工具追踪 + 流量与字数实时看板
+# 3. 极致瘦身备份 (Slim Backup): 过滤 80% 冗余数据，轻量化异地快照
+# 4. 秒级无感更新 (Seamless OTA): 重启瞬间存档进度，镜像式平滑升级
+# 5. 状态机等级监控: 实时日志流检测 + 60s 兜底轮询
 # =================================================================
 
 # 颜色配置
@@ -1252,17 +1254,18 @@ service cron restart || systemctl restart cron || service crond restart || true
 
 echo ""
 echo -e "${CYAN}=================================================================${PLAIN}"
-echo -e "${GREEN}🎉 OpenClaw Guardian 部署成功！${PLAIN}"
+echo -e "${GREEN}🎉 OpenClaw Guardian ${VERSION} 部署成功！${PLAIN}"
 echo -e "${CYAN}=================================================================${PLAIN}"
-echo -e "${YELLOW}📌 关键功能${PLAIN}"
-echo "  - 常驻守护: 你的 Telegram Bot 现在全天 24 小时在线"
-echo "  - 双层监控: journalctl 实时流 + 60s 兜底轮询"
-echo "  - 增量备份: 每 4 小时自动备份一次 OpenClaw 核心数据"
+echo -e "${YELLOW}📌 极客运维特性${PLAIN}"
+echo "  - 🦞 活字段实时回执 : 动态展示 AI 工具调用与消耗规模"
+echo "  - 🚀 秒级无感热更新 : 升级不打断思考，进度 100% 保全"
+echo "  - 📦 极致瘦身备份   : 自动过滤 80% 冗余，同步 Telegram 更快"
+echo "  - 🛡️ 稳捷守护监控   : 实时日志流检测 + 60s 异常兜底"
 echo ""
-echo -e "${YELLOW}🛠️ Telegram 命令列表${PLAIN}"
-echo "  /status   - 查看系统和 OpenClaw 状态"
-echo "  /backup   - 触发手动备份"
-echo "  /rollback - 历史备份一键回滚"
-echo "  /restart  - 强制重启 OpenClaw 服务"
-echo "  /logs     - 查看报错日志"
+echo -e "${YELLOW}🛠️ Telegram 指令集${PLAIN}"
+echo "  /status   - 系统负载与 OpenClaw 综合健康评估"
+echo "  /stats    - 消耗统计中心 (今日/累计/节省流量)"
+echo "  /backup   - 立即执行一次瘦身快照备份"
+echo "  /rollback - 交互式时光回滚，找回记忆"
+echo "  /update   - 执行瞬时存档无感 OTA 升级"
 echo -e "${CYAN}=================================================================${PLAIN}"
