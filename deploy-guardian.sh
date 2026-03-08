@@ -193,24 +193,23 @@ for PART in "\${PART_FILES[@]}"; do
       -F document="@\${PART}" \\
       -F caption="\${CAPTION}")
 
-    if echo "\$RESPONSE" | jq -e '.ok' >/dev/null; then
+    if echo "\$RESPONSE" | jq -e '.ok' >/dev/null 2>&1; then
         MSG_ID=\$(echo "\$RESPONSE" | jq -r '.result.message_id')
         FILE_ID=\$(echo "\$RESPONSE" | jq -r '.result.document.file_id')
         
         UPLOADED_IDS+=("\$FILE_ID")
-        echo "卷 \${PART_INDEX} 发送成功。"
+        echo "卷 \${PART_INDEX} 发送成功。" >> "$BACKUP_DIR/cron_backup.log"
     else
-        echo "Telegram 发送失败:"
-        echo "\$RESPONSE"
+        echo "❌ Telegram 发送失败 | 响应: \$RESPONSE" >> "$BACKUP_DIR/cron_backup.log"
         curl -s -X POST "https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage" \\
             -d chat_id="\${CHAT_ID}" \\
-            -d text="❌ [Guardian 备份失败] 无法上传。文件保留在: \${TMP_DIR}"
+            -d text="❌ [Guardian 备份失败] 卷 \${PART_INDEX} 上传失败。由于 Telegram API 报错，请检查网络或 Token。"
         exit 1
     fi
     PART_INDEX=\$((PART_INDEX + 1))
 done
 
-echo "所有分卷发送完毕！记录历史..."
+echo "所有分卷发送完毕！正在记录历史..." >> "$BACKUP_DIR/cron_backup.log"
 
 # 确保历史记录文件存在且格式正确，否则自动修复为 []
 if ! jq -e . "\${HISTORY_FILE}" >/dev/null 2>&1; then
@@ -305,7 +304,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.4"
+VERSION = "v1.5.5"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
