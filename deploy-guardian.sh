@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.9"
+VERSION="v1.10.0"
 set -e
 
 # =================================================================
@@ -334,7 +334,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.9"
+VERSION = "v1.10.0"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -749,7 +749,9 @@ def ota_monitor():
     notified_version = VERSION
     while True:
         try:
-            r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=15)
+            # [Fix v1.10.0] 引入随机时间戳对消 CDN 缓存，确保永远检查到最新版
+            t = int(time.time())
+            r = requests.get(f"https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh?t={t}", timeout=15)
             if r.status_code == 200:
                 remote_version = None
                 # 使用正则更稳健地提取版本号
@@ -757,8 +759,8 @@ def ota_monitor():
                 if v_match:
                     remote_version = v_match.group(1)
                     if v_tuple(remote_version) > v_tuple(VERSION) and remote_version != notified_version:
-                        # 获取更新日志 (Fetch latest changelog entry)
-                        cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
+                        # 获取更新日志 (Fetch latest changelog entry with cache-bust)
+                        cl_r = requests.get(f"https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md?t={t}", timeout=10)
                         notes = ""
                         if cl_r.status_code == 200:
                             p = False
@@ -1066,9 +1068,10 @@ def handle_callback(cb):
     if data.startswith("ota_direct:"):
         remote_v = data.split(":")[1]
         try:
-            r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=5)
+            # [Fix v1.10.0] 确认环节同样加入缓存穿透
+            t = int(time.time())
+            r = requests.get(f"https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh?t={t}", timeout=5)
             if r.status_code == 200:
-                cv_match = re.search(r'VERSION = "(.*?)"', r.text)
                 if cv_match:
                     remote_v_str = cv_match.group(1)
                     if v_tuple(remote_v_str) > v_tuple(VERSION):
@@ -1092,10 +1095,11 @@ def handle_callback(cb):
         save_resume_state() # 重启前存档 (Zero Loss)
         send_msg("⚙️ <b>指令已确认，正在执行热更新部署...</b>\n请稍候，系统将固化当前状态并在重启后自动接管进度。")
         run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
+        t = int(time.time())
         update_script = f'''#!/usr/bin/env bash
-curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
+curl -sL "https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh?t={t}" | bash > {BACKUP_DIR}/update.log 2>&1
 if [ \\$? -eq 0 ]; then
-  CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{{if (p) exit; p=1; next}} p')
+  CHANGELOG=\$(curl -sL "https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md?t={t}" | awk '/^## \\\[v/{{if (p) exit; p=1; next}} p')
   if [ -z "\$CHANGELOG" ]; then CHANGELOG="本次升降级未提供更新日志说明。"; fi
   curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>无感接管成功。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
 else
