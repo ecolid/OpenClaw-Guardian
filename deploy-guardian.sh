@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.0"
+VERSION="v1.9.1"
 set -e
 
 # =================================================================
@@ -332,7 +332,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.0"
+VERSION = "v1.9.1"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -476,8 +476,12 @@ def thinking_monitor():
     global is_thinking, think_start_time, think_msg_id
     session_chars = 0
     session_folds = 0
-    session_tools = 0
+    session_tools = {} # 动态工具映射 e.g. {"web_search": 1}
     session_scale = 0
+    session_error = None
+    session_media_saved = 0.0 # MB
+    session_wait_ms = 0
+    session_warn = None
     
     def update_think_msg(final=False):
         global think_msg_id, last_shown_time
@@ -497,15 +501,35 @@ def thinking_monitor():
             perf_icon = "📈" if diff <= 0.5 else "📉"
             
             fold_str = f"\n♻️ 记忆折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
-            tool_str = f"\n🛠️ 工具执行: <code>{session_tools}</code> 次" if session_tools > 0 else ""
+            
+            # 工具明细渲染 (Live Fields)
+            tool_items = []
+            MAP = {"web_search": "搜索", "browser_subagent": "阅卷", "generate_image": "绘图", "message": "消息"}
+            for k, v in session_tools.items():
+                name = MAP.get(k, k)
+                tool_items.append(f"{name}:{v}")
+            tool_str = f"\n🛠️ {' | '.join(tool_items)}" if tool_items else ""
+            
             scale_str = f" (规模: <code>{session_scale/1000:.1f}k</code>)" if session_scale > 0 else ""
-            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{scale_str}{tool_str}{fold_str}"
+            media_str = f"\n🖼️ 媒体优化: 节省 <code>{session_media_saved:.2f}MB</code>" if session_media_saved > 0.01 else ""
+            err_str = f"\n🚨 异常: <code>{session_error}</code>" if session_error else ""
+            wait_str = f" | ⏱️ 排队: <code>{session_wait_ms/1000:.1f}s</code>" if session_wait_ms > 50 else ""
+            warn_str = f"\n⚠️ 内容过长已截断" if session_warn else ""
+            
+            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s{wait_str} {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{scale_str}{media_str}{tool_str}{fold_str}{err_str}{warn_str}"
         else:
             # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
             moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
             icon = moons[int(time.time() * 2) % len(moons)]
+            
+            tool_items = []
+            for k, v in session_tools.items():
+                tool_items.append(f"{k}:{v}")
+            tool_live = f" | 🛠️ {' '.join(tool_items)}" if tool_items else ""
+            err_live = " | 🚨 有异常" if session_error else ""
+            
             inc_str = f" (+{delta}s)" if delta > 0 else ""
-            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}"
+            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{tool_live}{err_live}"
         
         try:
             resp = requests.post(f"{API_URL}/editMessageText", json={
@@ -538,8 +562,12 @@ def thinking_monitor():
                         last_shown_time = 0
                         session_chars = 0
                         session_folds = 0
-                        session_tools = 0
+                        session_tools = {}
                         session_scale = 0
+                        session_error = None
+                        session_media_saved = 0.0
+                        session_wait_ms = 0
+                        session_warn = False
                         # 补发一条计时核心，标记为“恢复检测”
                         resp = requests.post(f"{API_URL}/sendMessage", json={
                             "chat_id": CHAT_ID, "text": "🦞 <b>检测到小龙虾正在思考中... (启动恢复)</b>\n⏱️ 已耗时: <code>计算中...</code>",
@@ -566,8 +594,12 @@ def thinking_monitor():
                     last_shown_time = 0
                     session_chars = 0
                     session_folds = 0
-                    session_tools = 0
+                    session_tools = {}
                     session_scale = 0
+                    session_error = None
+                    session_media_saved = 0.0
+                    session_wait_ms = 0
+                    session_warn = False
                     resp = requests.post(f"{API_URL}/sendMessage", json={
                         "chat_id": CHAT_ID, "text": "🦞 <b>小龙虾正在思考中...</b>\n⏱️ 已耗时: <code>0s</code>",
                         "parse_mode": "HTML", "disable_notification": True
@@ -581,18 +613,38 @@ def thinking_monitor():
 
                 # --- 实时采集单次会话的数据 ---
                 if is_thinking:
-                    # 匹配消耗与规模 (historyTextChars=规模, prompt/completion=新增消耗)
+                    # 匹配消耗与规模
                     m = re.search(r'(promptChars|completionChars|historyTextChars)=(\d+)', line_str)
                     if m:
                         k, v = m.group(1), int(m.group(2))
                         if k == 'historyTextChars': session_scale = v
                         else: session_chars += v
                     
-                    # 匹配工具调用：捕捉 embedded run tool start 动作
-                    if 'embedded run tool start' in line_str:
-                        session_tools += 1
+                    # 匹配工具调用：动态捕捉所有 tool=xxx 字段
+                    tool_match = re.search(r'embedded run tool start:.*tool=([a-z_0-9]+)', line_str)
+                    if tool_match:
+                        tname = tool_match.group(1)
+                        session_tools[tname] = session_tools.get(tname, 0) + 1
                     
-                    # 匹配折叠：排除 pre-prompt 里的静态快照，仅捕捉动态 action
+                    # 匹配媒体优化：Optimized media from 2.54MB to 0.26MB
+                    media_match = re.search(r'Optimized media from ([\d.]+)MB to ([\d.]+)MB', line_str)
+                    if media_match:
+                        saved = float(media_match.group(1)) - float(media_match.group(2))
+                        if saved > 0: session_media_saved += saved
+                    
+                    # 匹配异常：[tools] message failed: xxx
+                    if '[tools] message failed:' in line_str:
+                        session_error = line_str.split('[tools] message failed:')[1].strip()
+                    
+                    # 匹配排队延迟：waitMs=7
+                    wait_match = re.search(r'waitMs=(\d+)', line_str)
+                    if wait_match: session_wait_ms = int(wait_match.group(1))
+
+                    # 匹配长文警告：preview final too long
+                    if 'preview final too long' in line_str:
+                        session_warn = True
+
+                    # 匹配折叠
                     if 'compacting' in line_str.lower() or 'folding' in line_str.lower():
                         if '[diagnostic]' not in line_str: session_folds += 1
 
