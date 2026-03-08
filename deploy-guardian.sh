@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.6"
+VERSION="v1.9.7"
 set -e
 
 # =================================================================
@@ -334,7 +334,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.6"
+VERSION = "v1.9.7"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -351,6 +351,11 @@ TOOL_MAP = {
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
+
+def v_tuple(v_str):
+    """将版本号(如 v1.9.7)转换为可比较的元组 (1, 9, 7)"""
+    try: return tuple(map(int, re.sub(r'[^0-9.]', '', v_str).split('.')))
+    except: return (0, 0, 0)
 
 # --- 全局会话状态 (v1.9.6 加固) ---
 is_thinking = False
@@ -743,7 +748,7 @@ def ota_monitor():
                 v_match = re.search(r'VERSION = "(.*?)"', r.text)
                 if v_match:
                     remote_version = v_match.group(1)
-                    if remote_version != VERSION and remote_version != notified_version:
+                    if v_tuple(remote_version) > v_tuple(VERSION) and remote_version != notified_version:
                         # 获取更新日志 (Fetch latest changelog entry)
                         cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
                         notes = ""
@@ -1056,9 +1061,11 @@ def handle_callback(cb):
             r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=5)
             if r.status_code == 200:
                 cv_match = re.search(r'VERSION = "(.*?)"', r.text)
-                if cv_match and cv_match.group(1) == remote_v:
-                    handle_callback({"data": "ota_confirm", "id": cb["id"], "message": cb["message"]})
-                    return
+                if cv_match:
+                    remote_v_str = cv_match.group(1)
+                    if v_tuple(remote_v_str) > v_tuple(VERSION):
+                        handle_callback({"data": "ota_confirm", "id": cb["id"], "message": cb["message"]})
+                        return
         except: pass
         handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
         return

@@ -1,3 +1,13 @@
+## [v1.9.7] - 2026-03-09
+### Fixed
+- **语义化版本比对 (Semantic Versioning)**: 引入 `v_tuple` 比较机制，将版本检查逻辑从 `!=` 升级为 `>`。
+- **缓存对消工程 (CDN Cache Mitigation)**: 解决了由于 GitHub CDN 缓存未刷新导致脚本反复提示“发现旧版本”的逻辑矛盾。
+
+## [v1.9.6] - 2026-03-09
+### Fixed
+- **无感续传动画唤醒 (Resumed Session Vitality)**: 修复了在无感重启后，由于未及时启动计时器与 Typing 线程，导致复活的会话处于“假死”或静默的问题。
+- **变量命名兜底**: 修复了 `update_think_msg` 中由于 `tool_tools` 变量拼写错误导致的后台线程崩溃。
+
 ## [v1.9.5] - 2026-03-09
 ### Fixed
 - **作用域异常修复 (Scope Fix)**: 修复了 `save_resume_state` 函数定义在监控循环内导致的 OTA 升级 NameError 故障。
