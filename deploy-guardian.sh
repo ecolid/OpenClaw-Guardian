@@ -325,7 +325,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.6"
+VERSION = "v1.8.7"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -469,6 +469,7 @@ def thinking_monitor():
     global is_thinking, think_start_time, think_msg_id
     session_chars = 0
     session_folds = 0
+    session_tools = 0
     
     def update_think_msg(final=False):
         global think_msg_id, last_shown_time
@@ -488,7 +489,8 @@ def thinking_monitor():
             perf_icon = "📈" if diff <= 0.5 else "📉"
             
             fold_str = f"\n♻️ 上下文折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
-            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
+            tool_str = f"\n🛠️ 工具执行: <code>{session_tools}</code> 次" if session_tools > 0 else ""
+            text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{tool_str}{fold_str}"
         else:
             # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
             moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
@@ -566,10 +568,18 @@ def thinking_monitor():
 
                 # --- 实时采集单次会话的数据 ---
                 if is_thinking:
-                    char_match = re.search(r'promptChars:(\d+)', line_str)
+                    # 匹配 promptChars=X (注意 shell heredoc 中的转义)
+                    char_match = re.search(r'promptChars=(\d+)', line_str)
                     if char_match: session_chars += int(char_match.group(1))
-                    if 'compaction' in line_str.lower() or 'folding' in line_str.lower():
-                        session_folds += 1
+                    
+                    # 匹配工具调用：排除 diagnostic/telegram/routing 等系统日志，抓取 web_search/brave/python 等执行日志
+                    # 通常工具日志不带 [diagnostic] 等系统标签，或者带有特定的 [tool] 标签
+                    if ']:' in line_str and not any(x in line_str for x in ['[diagnostic]', '[telegram]', '[routing]', '[agent/embedded]']):
+                        session_tools += 1
+                    
+                    # 匹配折叠：只有当真正执行 folding 逻辑时才计入，过滤掉 pre-prompt 里的静态统计
+                    if 'compacting' in line_str.lower() or 'folding' in line_str.lower():
+                        if '[diagnostic]' not in line_str: session_folds += 1
 
                 if 'new=idle' in line_str and 'run_completed' in line_str:
                     if is_thinking:
@@ -580,10 +590,10 @@ def thinking_monitor():
                         save_stats(s)
                         update_think_msg(final=True)
                 
-                # --- [Stats Logic 1.5.8/1.6.1] ---
+                # --- [Stats Logic 1.8.7 Fix] ---
                 if 'pre-prompt:' in line_str and 'promptChars=' in line_str:
                     try:
-                        pc = int(re.search(r'promptChars=(\\d+)', line_str).group(1))
+                        pc = int(re.search(r'promptChars=(\d+)', line_str).group(1))
                         s = load_stats(); s['total_prompt_chars'] += pc; s['today_prompt_chars'] += pc
                         s['total_convs'] += 1; s['today_convs'] += 1
                         save_stats(s)
