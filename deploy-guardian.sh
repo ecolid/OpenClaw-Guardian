@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+VERSION="v1.8.8"
 set -e
 
 # =================================================================
@@ -325,7 +326,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.7"
+VERSION = "v1.8.8"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -634,8 +635,8 @@ def ota_monitor():
                         notes = notes.strip()[:500]
                         changelog_str = f"\n\n📝 <b>新版更新内容:</b>\n<pre>{html.escape(notes)}</pre>" if notes else ""
                         
-                        btn = [[{"text": "📥 立即查看并准备更新", "callback_data": "ota_update"}]]
-                        send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>{changelog_str}\n\n建议点击下方按钮查看详情并进行热更新。", {"inline_keyboard": btn})
+                        btn = [[{"text": "📥 立即热更新 (One-Click)", "callback_data": f"ota_direct:{remote_version}"}]]
+                        send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>{changelog_str}\n\n检测到助手已完整播报，您可以点击下方按钮直接热更新。", {"inline_keyboard": btn})
                         notified_version = remote_version
         except Exception as e:
             # 仅在调试时开启，平时静默
@@ -923,6 +924,19 @@ def handle_callback(cb):
         return
     
     if data == "ota_update":
+        handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
+        return
+
+    if data.startswith("ota_direct:"):
+        remote_v = data.split(":")[1]
+        try:
+            r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=5)
+            if r.status_code == 200:
+                cv_match = re.search(r'VERSION = "(.*?)"', r.text)
+                if cv_match and cv_match.group(1) == remote_v:
+                    handle_callback({"data": "ota_confirm", "id": cb["id"], "message": cb["message"]})
+                    return
+        except: pass
         handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
         return
 
