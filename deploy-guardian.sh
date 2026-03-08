@@ -329,7 +329,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.6.5"
+VERSION = "v1.6.6"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -640,8 +640,11 @@ def handle_msg(msg):
 
             try:
                 now_h = time.localtime().tm_hour
-                next_h = ((now_h // 4) + 1) * 4
-                if next_h >= 24: next_h = 0
+                schedule = [3, 7, 11, 15, 19, 23]
+                next_h = 3 
+                for h in schedule:
+                    if h > now_h:
+                        next_h = h; break
                 next_backup_time = f"{next_h:02d}:00"
             except: next_backup_time = "计算中..."
 
@@ -927,8 +930,8 @@ systemctl disable sysmonitor 2>/dev/null || true
 
 systemctl restart openclaw-guardian
 
-# 每 4 小时执行一次备份 (改用最高兼容性的显式小时列表，并强制指定 bash 执行)
-CRON_CMD="0 0,4,8,12,16,20 * * * /bin/bash $BACKUP_DIR/backup.sh >> $BACKUP_DIR/cron_backup.log 2>&1"
+# 每 4 小时执行一次备份 (定制: 11点、15点等 4小时步进)
+CRON_CMD="0 3,7,11,15,19,23 * * * /bin/bash \$BACKUP_DIR/backup.sh >> \$BACKUP_DIR/cron_backup.log 2>&1"
 (crontab -l 2>/dev/null | grep -v "$BACKUP_DIR/backup.sh" || true; echo "$CRON_CMD") | crontab -
 
 # 强制重启一次 Cron 服务以激活新配置
