@@ -310,7 +310,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.8"
+VERSION = "v1.5.9"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -423,13 +423,13 @@ def thinking_monitor():
     def update_think_msg(final=False):
         global think_msg_id
         if not think_msg_id: return
-        elapsed = time.time() - think_start_time
+        elapsed = int(time.time() - think_start_time)
         if final:
-            text = f"✅ <b>小龙虾思考完毕！</b>\n📊 总耗时: <code>{elapsed:.1f}</code> 秒"
+            text = f"✅ <b>小龙虾思考完毕！</b>\n📊 总耗时: <code>{elapsed}</code> 秒"
         else:
             icons = ["🧠", "⏳", "📡", "⚡"]
-            icon = icons[int(elapsed) % len(icons)]
-            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed:.1f}</code> 秒"
+            icon = icons[elapsed % len(icons)]
+            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒"
         
         try:
             requests.post(f"{API_URL}/editMessageText", json={
@@ -465,7 +465,7 @@ def thinking_monitor():
                     threading.Thread(target=typing_loop, daemon=True).start()
                     def live_ticker():
                         while is_thinking:
-                            update_think_msg(); time.sleep(1.8)
+                            update_think_msg(); time.sleep(1.0)
                     threading.Thread(target=live_ticker, daemon=True).start()
                 elif 'new=idle' in line_str and 'run_completed' in line_str:
                     if is_thinking:
@@ -627,8 +627,8 @@ def handle_msg(msg):
 
             # Think Status Header
             if is_thinking:
-                think_elapsed = time.time() - think_start_time
-                status_header = f"🦞 <b>小龙虾状态</b>: 🧠 思考中... (<code>{think_elapsed:.1f}s</code>)"
+                think_elapsed = int(time.time() - think_start_time)
+                status_header = f"🦞 <b>小龙虾状态</b>: 🧠 思考中... (<code>{think_elapsed}s</code>)"
             else:
                 status_header = f"🦞 <b>小龙虾状态</b>: 💤 空闲待命"
 
