@@ -325,7 +325,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.3"
+VERSION = "v1.8.4"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -789,21 +789,44 @@ def handle_msg(msg):
                 send_msg("✅ 回滚解包成功，正在重启监控服务载入旧版大脑...")
                 threading.Thread(target=lambda: (time.sleep(3), os.system("systemctl restart openclaw-guardian"))).start()
         else:
-            send_msg("🔄 收到指令，正在从 GitHub 获取并自动热更新守护程序...")
-            run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
-            update_script = f'''#!/usr/bin/env bash
-curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
-if [ \\$? -eq 0 ]; then
-  CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{{if (p) exit; p=1; next}} p')
-  if [ -z "\$CHANGELOG" ]; then CHANGELOG="本次升降级未提供更新日志说明。"; fi
-  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
-else
-  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="❌ 升级脚本执行异常，查看日志: {BACKUP_DIR}/update.log，已自动回滚至上一版本。"
-  cd {BACKUP_DIR} && cp backup.sh.bak backup.sh && cp guardian-bot.py.bak guardian-bot.py && systemctl restart openclaw-guardian
-fi
-'''
-            with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
-            os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
+            send_msg("🔍 正在连线 GitHub 检查最新的 Guardian 状态...")
+            try:
+                r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=10)
+                if r.status_code == 200:
+                    remote_v = "未知"
+                    for line in r.text.split('\n'):
+                        if line.startswith('VERSION = "'):
+                            remote_v = line.split('"')[1]; break
+                    
+                    cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
+                    notes = ""
+                    if cl_r.status_code == 200:
+                        p = False
+                        for l in cl_r.text.split('\n'):
+                            if l.strip().startswith('## [v'):
+                                if p: break
+                                p = True; continue
+                            if p: notes += l + '\n'
+                    
+                    notes = notes.strip()[:600]
+                    change_info = f"\n\n📝 <b>最新版更新内容:</b>\n<pre>{html.escape(notes)}</pre>" if notes else ""
+                    
+                    if remote_v == VERSION:
+                        status_str = f"✅ <b>当前已是最新版本 ({VERSION})</b>\n您可以选择强制重装当前版本以修复潜在环境问题。"
+                        btn_txt = "🔄 强制重新部署当前版本"
+                    else:
+                        status_str = f"🚀 <b>发现新版本: {remote_v}</b> (当前: {VERSION})"
+                        btn_txt = f"📥 立即升级至 {remote_v}"
+                        
+                    btn = [
+                        [{"text": btn_txt, "callback_data": "ota_confirm"}],
+                        [{"text": "❌ 取消本次更新", "callback_data": "cancel"}]
+                    ]
+                    send_msg(f"☁️ <b>Guardian 远程更新检查中心</b>\n{status_str}{change_info}\n\n是否立即执行部署脚本并重启服务？", {"inline_keyboard": btn})
+                else:
+                    send_msg("❌ 无法获取远程版本信息，请检查 VPS 网络。")
+            except Exception as e:
+                send_msg(f"❌ 链路异常: {str(e)}")
     elif text.startswith("/logs"):
         cmd_parts = text.split()
         if len(cmd_parts) > 1 and cmd_parts[1].lower() == "cron":
@@ -890,6 +913,24 @@ def handle_callback(cb):
     
     if data == "ota_update":
         handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
+        return
+
+    if data == "ota_confirm":
+        send_msg("⚙️ <b>指令已确认，正在执行热更新部署...</b>\n请稍候，由于涉及服务重启，Bot 可能会短时间断连。")
+        run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
+        update_script = f'''#!/usr/bin/env bash
+curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
+if [ \\$? -eq 0 ]; then
+  CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{{if (p) exit; p=1; next}} p')
+  if [ -z "\$CHANGELOG" ]; then CHANGELOG="本次升降级未提供更新日志说明。"; fi
+  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
+else
+  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="❌ 升级脚本执行异常，查看日志: {BACKUP_DIR}/update.log，已自动回滚至上一版本。"
+  cd {BACKUP_DIR} && cp backup.sh.bak backup.sh && cp guardian-bot.py.bak guardian-bot.py && systemctl restart openclaw-guardian
+fi
+'''
+        with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
+        os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
         return
         
     if data.startswith("qg_"):
