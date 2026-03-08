@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.1"
+VERSION="v1.9.2"
 set -e
 
 # =================================================================
@@ -332,7 +332,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.1"
+VERSION = "v1.9.2"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -504,7 +504,14 @@ def thinking_monitor():
             
             # 工具明细渲染 (Live Fields)
             tool_items = []
-            MAP = {"web_search": "搜索", "browser_subagent": "阅卷", "generate_image": "绘图", "message": "消息"}
+            MAP = {
+                "web_search": "搜索", 
+                "browser_subagent": "阅卷", 
+                "generate_image": "绘图", 
+                "message": "消息",
+                "exec": "命令执行",
+                "process": "进程管理"
+            }
             for k, v in session_tools.items():
                 name = MAP.get(k, k)
                 tool_items.append(f"{name}:{v}")
@@ -613,9 +620,8 @@ def thinking_monitor():
 
                 # --- 实时采集单次会话的数据 ---
                 if is_thinking:
-                    # 匹配消耗与规模
-                    m = re.search(r'(promptChars|completionChars|historyTextChars)=(\d+)', line_str)
-                    if m:
+                    # 匹配消耗与规模 (使用 finditer 捕捉单行内的多个指标)
+                    for m in re.finditer(r'(promptChars|completionChars|historyTextChars)=(\d+)', line_str):
                         k, v = m.group(1), int(m.group(2))
                         if k == 'historyTextChars': session_scale = v
                         else: session_chars += v
