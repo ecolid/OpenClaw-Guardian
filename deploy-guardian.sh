@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.8"
+VERSION="v1.9.9"
 set -e
 
 # =================================================================
@@ -334,7 +334,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.8"
+VERSION = "v1.9.9"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -576,6 +576,17 @@ def thinking_monitor():
     global is_thinking, think_start_time, think_msg_id, last_shown_time
     global session_chars, session_folds, session_tools, session_scale, session_error, session_media_saved, session_wait_ms, session_warn
 
+    # [Fix v1.9.9] 将辅助线程定义移至顶层，防止续传逻辑中出现 NameError
+    def typing_loop():
+        while is_thinking:
+            try: requests.post(f"{API_URL}/sendChatAction", json={"chat_id": CHAT_ID, "action": "typing"}, timeout=5)
+            except: pass
+            time.sleep(4)
+
+    def live_ticker():
+        while is_thinking:
+            update_think_msg(); time.sleep(1.0)
+
     # --- 无损续传加载逻辑 ---
     if os.path.exists(RESUME_FILE):
         try:
@@ -598,7 +609,7 @@ def thinking_monitor():
             # [Fix v1.9.8] 视觉强化：发送崭新消息置于对话底端，取代旧消息 ID
             resp = requests.post(f"{API_URL}/sendMessage", json={
                 "chat_id": CHAT_ID, 
-                "text": "🔄 <b>无感重启完成</b>: 已成功找回进度，正在尝试置底恢复...", 
+                "text": "🔄 <b>无感重启完成</b>: 已成功找回进度，并尝试置底恢复...", 
                 "parse_mode": "HTML", "disable_notification": True
             }, timeout=10).json()
             
@@ -607,17 +618,8 @@ def thinking_monitor():
             
             # 重启后立刻恢复动画和输入状态
             threading.Thread(target=typing_loop, daemon=True).start()
-            def live_ticker():
-                while is_thinking:
-                    update_think_msg(); time.sleep(1.0)
             threading.Thread(target=live_ticker, daemon=True).start()
         except: pass
-
-    def typing_loop():
-        while is_thinking:
-            try: requests.post(f"{API_URL}/sendChatAction", json={"chat_id": CHAT_ID, "action": "typing"}, timeout=5)
-            except: pass
-            time.sleep(4)
 
     while True:
         try:
@@ -647,9 +649,6 @@ def thinking_monitor():
                         }, timeout=5).json()
                         if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
                         threading.Thread(target=typing_loop, daemon=True).start()
-                        def live_ticker():
-                            while is_thinking:
-                                update_think_msg(); time.sleep(1.0)
                         threading.Thread(target=live_ticker, daemon=True).start()
                         break
                     elif 'new=idle' in l and 'run_completed' in l:

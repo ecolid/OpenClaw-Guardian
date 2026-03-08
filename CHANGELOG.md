@@ -1,3 +1,7 @@
+## [v1.9.9] - 2026-03-09
+### Fixed
+- **续传线程作用域加固 (Thread Scope Hardening)**: 修复了 v1.9.8 中因辅助线程定义位置导致的 NameError 崩溃，确保无感重启后的实时计时器 100% 成功复活。
+
 ## [v1.9.8] - 2026-03-09
 ### Changed
 - **无感续传视觉强化 (Resume Visibility Overhaul)**: 
