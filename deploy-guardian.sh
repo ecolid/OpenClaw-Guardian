@@ -305,7 +305,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.2"
+VERSION = "v1.5.3"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -494,6 +494,14 @@ def handle_msg(msg):
             cron_job = run_cmd("crontab -l 2>/dev/null | grep 'backup.sh'").strip()
             cron_job_status = "✅ 已注册" if cron_job else "❌ 未发现任务"
 
+            # Predict Next Backup (every 4h: 0, 4, 8, 12, 16, 20)
+            try:
+                now_h = time.localtime().tm_hour
+                next_h = ((now_h // 4) + 1) * 4
+                if next_h >= 24: next_h = 0
+                next_backup_time = f"{next_h:02d}:00"
+            except: next_backup_time = "计算中..."
+
             # Dashboard Assembly
             dash = f'''📊 <b>核心引擎状态 (Guardian {VERSION})</b>
 -----------------------------------
@@ -512,6 +520,7 @@ def handle_msg(msg):
 <b>[自动化调度中心]</b>
 ⏰ <b>Cron 服务</b>: <code>{cron_status}</code>
 📌 <b>定时任务</b>: <code>{cron_job_status}</code>
+⏭️ <b>下次预定</b>: <code>今天 {next_backup_time}</code>
 </pre>
 -----------------------------------'''
             send_msg(dash)
@@ -768,8 +777,8 @@ systemctl disable sysmonitor 2>/dev/null || true
 
 systemctl restart openclaw-guardian
 
-# 每 4 小时执行一次备份 (重定向日志以供排错)
-CRON_CMD="0 */4 * * * $BACKUP_DIR/backup.sh >> $BACKUP_DIR/cron_backup.log 2>&1"
+# 每 4 小时执行一次备份 (增加环境声明，重定向日志以供排错)
+CRON_CMD="0 */4 * * * SHELL=/bin/bash PATH=/usr/local/bin:/usr/bin:/bin $BACKUP_DIR/backup.sh >> $BACKUP_DIR/cron_backup.log 2>&1"
 (crontab -l 2>/dev/null | grep -v "$BACKUP_DIR/backup.sh" || true; echo "$CRON_CMD") | crontab -
 
 echo ""
