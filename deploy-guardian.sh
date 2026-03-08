@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.2"
+VERSION="v1.9.3"
 set -e
 
 # =================================================================
@@ -332,11 +332,23 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.2"
+VERSION = "v1.9.3"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
+RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
+
+TOOL_MAP = {
+    "web_search": "搜索", 
+    "browser_subagent": "阅卷", 
+    "generate_image": "绘图", 
+    "message": "发送消息",
+    "exec": "命令执行",
+    "process": "进程管理",
+    "read_url_content": "阅卷"
+}
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
+ota_pending_final = False # 提示线程安全结束当前的思考会话
 is_thinking = False
 think_start_time = 0
 think_msg_id = None
@@ -482,6 +494,39 @@ def thinking_monitor():
     session_media_saved = 0.0 # MB
     session_wait_ms = 0
     session_warn = None
+
+    # --- 无损续传加载逻辑 ---
+    if os.path.exists(RESUME_FILE):
+        try:
+            with open(RESUME_FILE, "r") as f:
+                state = json.load(f)
+                is_thinking = True
+                think_msg_id = state.get("msg_id")
+                think_start_time = state.get("start_ts")
+                session_chars = state.get("chars", 0)
+                session_folds = state.get("folds", 0)
+                session_tools = state.get("tools", {})
+                session_scale = state.get("scale", 0)
+                session_media_saved = state.get("media", 0.0)
+                session_wait_ms = state.get("wait", 0)
+                session_warn = state.get("warn", False)
+                session_error = state.get("error")
+            os.remove(RESUME_FILE) # 仅恢复一次
+            send_msg("🔄 <b>小龙虾无感重启完成</b>: 已成功找回之前的思考进度，继续监听日志...", disable_notification=True)
+        except: pass
+
+    def save_resume_state():
+        if not is_thinking or not think_msg_id: return
+        try:
+            with open(RESUME_FILE, "w") as f:
+                json.dump({
+                    "msg_id": think_msg_id, "start_ts": think_start_time,
+                    "chars": session_chars, "folds": session_folds,
+                    "tools": session_tools, "scale": session_scale,
+                    "media": session_media_saved, "wait": session_wait_ms,
+                    "warn": session_warn, "error": session_error
+                }, f)
+        except: pass
     
     def update_think_msg(final=False):
         global think_msg_id, last_shown_time
@@ -504,16 +549,8 @@ def thinking_monitor():
             
             # 工具明细渲染 (Live Fields)
             tool_items = []
-            MAP = {
-                "web_search": "搜索", 
-                "browser_subagent": "阅卷", 
-                "generate_image": "绘图", 
-                "message": "消息",
-                "exec": "命令执行",
-                "process": "进程管理"
-            }
             for k, v in session_tools.items():
-                name = MAP.get(k, k)
+                name = TOOL_MAP.get(k, k)
                 tool_items.append(f"{name}:{v}")
             tool_str = f"\n🛠️ {' | '.join(tool_items)}" if tool_items else ""
             
@@ -524,6 +561,7 @@ def thinking_monitor():
             warn_str = f"\n⚠️ 内容过长已截断" if session_warn else ""
             
             text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s{wait_str} {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{scale_str}{media_str}{tool_str}{fold_str}{err_str}{warn_str}"
+            if os.path.exists(RESUME_FILE): os.remove(RESUME_FILE) # 正常结束清除存档
         else:
             # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
             moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
@@ -531,7 +569,8 @@ def thinking_monitor():
             
             tool_items = []
             for k, v in session_tools.items():
-                tool_items.append(f"{k}:{v}")
+                name = TOOL_MAP.get(k, k)
+                tool_items.append(f"{name}:{v}")
             tool_live = f" | 🛠️ {' '.join(tool_items)}" if tool_items else ""
             err_live = " | 🚨 有异常" if session_error else ""
             
@@ -592,6 +631,12 @@ def thinking_monitor():
 
             proc = subprocess.Popen("journalctl -f -u openclaw -n 0 --no-pager", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             while proc.poll() is None:
+                # --- OTA 强行截断并固化 (Case B) ---
+                if ota_pending_final and is_thinking:
+                    update_think_msg(final=True)
+                    is_thinking = False
+                    break
+
                 line = proc.stdout.readline()
                 if not line: break
                 line_str = line.decode("utf-8", errors="ignore").strip()
@@ -1012,22 +1057,43 @@ def handle_callback(cb):
         handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
         return
 
-    if data == "ota_confirm":
-        send_msg("⚙️ <b>指令已确认，正在执行热更新部署...</b>\n请稍候，由于涉及服务重启，Bot 可能会短时间断连。")
+    def perform_ota():
+        save_resume_state() # 重启前存档 (Zero Loss)
+        send_msg("⚙️ <b>指令已确认，正在执行热更新部署...</b>\n请稍候，系统将固化当前状态并在重启后自动接管进度。")
         run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
         update_script = f'''#!/usr/bin/env bash
 curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh | bash > {BACKUP_DIR}/update.log 2>&1
 if [ \\$? -eq 0 ]; then
   CHANGELOG=\$(curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md | awk '/^## \\\[v/{{if (p) exit; p=1; next}} p')
   if [ -z "\$CHANGELOG" ]; then CHANGELOG="本次升降级未提供更新日志说明。"; fi
-  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>新版守护程序已接管。如果出现异常，请发送 /update_rollback 回滚。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
+  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="✅ <b>升级部署成功！</b>无感接管成功。%0A%0A📝 <b>最新版本更新内容:</b>%0A\$CHANGELOG" -d parse_mode="HTML"
 else
-  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="❌ 升级脚本执行异常，查看日志: {BACKUP_DIR}/update.log，已自动回滚至上一版本。"
+  curl -s -X POST "https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" -d chat_id="{CHAT_ID}" -d text="❌ 升级脚本执行异常，查看日志: {BACKUP_DIR}/update.log，已自动回滚。"
   cd {BACKUP_DIR} && cp backup.sh.bak backup.sh && cp guardian-bot.py.bak guardian-bot.py && systemctl restart openclaw-guardian
 fi
 '''
         with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
         os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
+
+    def safe_ota_thread():
+        global ota_pending_final
+        wait_start = time.time()
+        send_msg("⏳ <b>检测到小龙虾正在思考</b>\n已为您开启更新排队，将在本轮对话结束或 10 分钟后强制执行（此时将自动固化当前进度）。")
+        while is_thinking and (time.time() - wait_start < 600):
+            time.sleep(5)
+        
+        if is_thinking:
+            send_msg("🚨 <b>等候超时 (10min)</b>: 启动无感热更新... 进度已固化，新版将立刻接管。")
+            ota_pending_final = True
+            while is_thinking: time.sleep(1) # 等待 monitor 线程完成 Finalize
+        
+        perform_ota()
+
+    if data == "ota_confirm" or data.startswith("ota_direct:"):
+        if is_thinking:
+            threading.Thread(target=safe_ota_thread).start()
+        else:
+            perform_ota()
         return
         
     if data.startswith("qg_"):
