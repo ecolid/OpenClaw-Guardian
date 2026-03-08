@@ -328,7 +328,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.7"
+VERSION = "v1.8.0"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -614,8 +614,23 @@ def ota_monitor():
                     if line.startswith('VERSION = "'):
                         remote_version = line.split('"')[1]
                         if remote_version != VERSION and remote_version != notified_version:
+                            # Fetch changelog (v1.8.0)
+                            cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
+                            notes = ""
+                            if cl_r.status_code == 200:
+                                cl_lines = cl_r.text.split('\n')
+                                p = False
+                                for l in cl_lines:
+                                    if l.strip().startswith('## [v'):
+                                        if p: break
+                                        p = True
+                                        continue
+                                    if p: notes += l + '\n'
+                            notes = notes.strip()[:500]
+                            changelog_str = f"\n\n📝 <b>新版更新内容:</b>\n<pre>{html.escape(notes)}</pre>" if notes else ""
+                            
                             btn = [[{"text": "📥 立即热更新系统 (OTA)", "callback_data": "ota_update"}]]
-                            send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>\n\n点击下方按钮或发送 /update 立即热部署。", {"inline_keyboard": btn})
+                            send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>{changelog_str}\n\n点击下方按钮或发送 /update 立即热部署。", {"inline_keyboard": btn})
                             notified_version = remote_version
                         break
         except: pass
@@ -852,7 +867,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.7"
+VERSION = "v1.8.0"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -1138,8 +1153,23 @@ def ota_monitor():
                     if line.startswith('VERSION = "'):
                         remote_version = line.split('"')[1]
                         if remote_version != VERSION and remote_version != notified_version:
+                            # Fetch changelog (v1.8.0)
+                            cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
+                            notes = ""
+                            if cl_r.status_code == 200:
+                                cl_lines = cl_r.text.split('\n')
+                                p = False
+                                for l in cl_lines:
+                                    if l.strip().startswith('## [v'):
+                                        if p: break
+                                        p = True
+                                        continue
+                                    if p: notes += l + '\n'
+                            notes = notes.strip()[:500]
+                            changelog_str = f"\n\n📝 <b>新版更新内容:</b>\n<pre>{html.escape(notes)}</pre>" if notes else ""
+                            
                             btn = [[{"text": "📥 立即热更新系统 (OTA)", "callback_data": "ota_update"}]]
-                            send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>\n\n点击下方按钮或发送 /update 立即热部署。", {"inline_keyboard": btn})
+                            send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>{changelog_str}\n\n点击下方按钮或发送 /update 立即热部署。", {"inline_keyboard": btn})
                             notified_version = remote_version
                         break
         except: pass
