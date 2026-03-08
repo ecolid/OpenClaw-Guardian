@@ -329,7 +329,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.6.3"
+VERSION = "v1.6.5"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -450,7 +450,8 @@ def thinking_monitor():
         if final:
             text = f"✅ <b>小龙虾思考完毕！</b>\n📊 总耗时: <code>{elapsed}</code> 秒"
         else:
-            icons = ["🧠", "⏳", "📡", "⚡"]
+            # 🕺 律动感更强的 Emoji 序列
+            icons = ["🧠", "💭", "⚡", "✨", "🛰️", "⚙️", "⏳", "📡"]
             icon = icons[elapsed % len(icons)]
             # 只有当耗时有增加时才显示增量标记，增强确定性
             inc_str = f" (+{delta}s)" if delta > 0 else ""
@@ -492,7 +493,7 @@ def thinking_monitor():
                     threading.Thread(target=typing_loop, daemon=True).start()
                     def live_ticker():
                         while is_thinking:
-                            update_think_msg(); time.sleep(2.0)
+                            update_think_msg(); time.sleep(1.5)
                     threading.Thread(target=live_ticker, daemon=True).start()
                 elif 'new=idle' in line_str and 'run_completed' in line_str:
                     if is_thinking:
