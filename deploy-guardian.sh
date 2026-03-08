@@ -310,10 +310,13 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.6"
+VERSION = "v1.5.7"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
+is_thinking = False
+think_start_time = 0
+think_msg_id = None
 
 def send_msg(text, reply_markup=None):
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
@@ -394,6 +397,64 @@ def health_monitor():
                     check_gold_standard("stream")
         except: pass
         time.sleep(3)
+
+def thinking_monitor():
+    """实时追踪 OpenClaw 思考状态并同步到 Telegram"""
+    global is_thinking, think_start_time, think_msg_id
+    
+    def update_think_msg(final=False):
+        global think_msg_id
+        if not think_msg_id: return
+        elapsed = time.time() - think_start_time
+        if final:
+            text = f"✅ <b>小龙虾思考完毕！</b>\n📊 总耗时: <code>{elapsed:.1f}</code> 秒"
+        else:
+            icons = ["🧠", "⏳", "📡", "⚡"]
+            icon = icons[int(elapsed) % len(icons)]
+            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed:.1f}</code> 秒"
+        
+        try:
+            requests.post(f"{API_URL}/editMessageText", json={
+                "chat_id": CHAT_ID, "message_id": think_msg_id, "text": text, "parse_mode": "HTML"
+            }, timeout=5)
+            if final:
+                time.sleep(5)
+                requests.post(f"{API_URL}/deleteMessage", json={"chat_id": CHAT_ID, "message_id": think_msg_id}, timeout=5)
+                think_msg_id = None
+        except: pass
+
+    def typing_loop():
+        while is_thinking:
+            try: requests.post(f"{API_URL}/sendChatAction", json={"chat_id": CHAT_ID, "action": "typing"}, timeout=5)
+            except: pass
+            time.sleep(4)
+
+    while True:
+        try:
+            proc = subprocess.Popen("journalctl -f -u openclaw -n 0 --no-pager", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            while proc.poll() is None:
+                line = proc.stdout.readline()
+                if not line: break
+                line_str = line.decode("utf-8", errors="ignore").strip()
+                if 'new=processing' in line_str and 'run_started' in line_str:
+                    is_thinking = True
+                    think_start_time = time.time()
+                    resp = requests.post(f"{API_URL}/sendMessage", json={
+                        "chat_id": CHAT_ID, "text": "Lobster 正在思考中... 🧠\n⏱️ 已耗时: <code>0.0</code> 秒",
+                        "parse_mode": "HTML", "disable_notification": True
+                    }, timeout=5).json()
+                    if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
+                    threading.Thread(target=typing_loop, daemon=True).start()
+                    def live_ticker():
+                        while is_thinking:
+                            update_think_msg(); time.sleep(1.8)
+                    threading.Thread(target=live_ticker, daemon=True).start()
+                elif 'new=idle' in line_str and 'run_completed' in line_str:
+                    if is_thinking:
+                        is_thinking = False
+                        update_think_msg(final=True)
+        except: pass
+        time.sleep(5)
 
 def ota_monitor():
     """后台轮询 GitHub 检查更新"""
@@ -507,9 +568,17 @@ def handle_msg(msg):
                 next_backup_time = f"{next_h:02d}:00"
             except: next_backup_time = "计算中..."
 
+            # Think Status Header
+            if is_thinking:
+                think_elapsed = time.time() - think_start_time
+                status_header = f"🦞 <b>小龙虾状态</b>: 🧠 思考中... (<code>{think_elapsed:.1f}s</code>)"
+            else:
+                status_header = f"🦞 <b>小龙虾状态</b>: 💤 空闲待命"
+
             # Dashboard Assembly
             dash = f'''📊 <b>核心引擎状态 (Guardian {VERSION})</b>
 -----------------------------------
+{status_header}
 {oc_emoji} <b>OpenClaw</b> [<code>{oc_status}</code>] ({oc_time_str})
 ⏱️ <b>宿主机 Uptime</b>: <code>{uptime}</code>
 🔥 <b>负载热度</b> (1/5/15m): <code>{load}</code>
@@ -730,6 +799,7 @@ def main():
     set_commands()
     send_msg(f"👋 <b>Guardian 守护进程 ({VERSION}) 已启动并接管 OpenClaw！</b>\n随时可以使用 /status 检查状态。")
     threading.Thread(target=health_monitor, daemon=True).start()
+    threading.Thread(target=thinking_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
     try:
         r = requests.get(f"{API_URL}/getUpdates", timeout=5).json()
