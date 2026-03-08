@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.8.8"
+VERSION="v1.8.9"
 set -e
 
 # =================================================================
@@ -153,8 +153,14 @@ IN_EOF
 
 echo "正在打包..."
 # 忽略打包过程中文件被修改(如数据库写入)导致的警告和退出
-# 自动排除图片、视频等大体积多媒体文件，防止 Playwright 截图撑爆备份包
-tar --warning=no-file-changed --exclude="*.png" --exclude="*.jpg" --exclude="*.jpeg" --exclude="*.webp" --exclude="*.mp4" --exclude="*Cache*" --exclude="*cache*" --exclude="*.log" --exclude="logs" --exclude="*Code Cache*" --exclude="*Crashpad*" -czf "\${BACKUP_FILE}" config/ restore.sh || true
+# 自动排除图片、视频、缓存等大体积多媒体文件，防止 Playwright 截图撑爆备份包
+tar --warning=no-file-changed \
+    --exclude="*.png" --exclude="*.jpg" --exclude="*.jpeg" --exclude="*.webp" \
+    --exclude="*.gif" --exclude="*.mp4" --exclude="*.pma" \
+    --exclude="*Cache*" --exclude="*cache*" --exclude="*Code*" \
+    --exclude="*.log" --exclude="logs" --exclude="*Crashpad*" \
+    --exclude=".git" --exclude="*.html" \
+    -czf "\${BACKUP_FILE}" config/ restore.sh || true
 
 echo "正在处理 Telegram 附件限制 (45MB)..."
 
@@ -326,7 +332,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.8"
+VERSION = "v1.8.9"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
