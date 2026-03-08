@@ -4,17 +4,17 @@ This document defines the safety protocols to ensure system stability and preven
 
 ## 🛡️ Core Rules
 
-1.  **Main Branch Protection**: NEVER commit experimental or unverified changes directly to the `main` branch. The `main` branch must always contain a "Known Good" state (currently v1.8.1-stable).
-2.  **Laboratory Branch (`dev`)**: All new features, optimizations, or rhythm adjustments MUST happen on the `dev` branch.
-3.  **Pre-flight Linting**: Before merge or push, you must run the automated linter to catch syntax errors in embedded scripts:
+1.  **Main Branch Focus**: The `main` branch is the single source of truth. All production code, stability fixes, and feature releases directly target `main`.
+2.  **Explicit Branching**: Dedicated branches (e.g., `feature/...`) should only be created when explicitly requested by the USER for large or experimental experimental research.
+3.  **Pre-flight Linting**: Before every push to `main`, the automated linter must be run to catch potential syntax errors:
     ```bash
     python3 scripts/lint_guardian.py
     ```
 
 ## 🏗️ Versioning Strategy
 
--   **Minor/Patch Updates**: Bug fixes and robust improvements go to `dev`, then merged to `main`.
--   **Experimental Features**: Use dedicated feature branches like `feature/absolute-rhythm`.
+-   **Production Sync**: Every push is considered a potential release candidate.
+-   **Stable Tags**: Use git tags (e.g., `v1.8.x`) to mark stable milestones.
 
 ## 📜 Lessons Learned (The v1.8.8 Incident)
 -   Avoid "Puppet Nesting" (Shell within Python within Shell) without rigorous escaping.
