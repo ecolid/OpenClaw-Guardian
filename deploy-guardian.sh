@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.10.0"
+VERSION="v1.10.1"
 set -e
 
 # =================================================================
@@ -334,10 +334,11 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.10.0"
+VERSION = "v1.10.1"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
+HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
 
 TOOL_MAP = {
     "web_search": "搜索", 
