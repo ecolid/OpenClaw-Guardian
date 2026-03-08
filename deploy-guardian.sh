@@ -112,6 +112,12 @@ BOT_TOKEN="${TG_BOT_TOKEN}"
 CHAT_ID="${TG_CHAT_ID}"
 echo "-----------------------------------" >> "$BACKUP_DIR/cron_backup.log"
 echo "🚀 备份脚本启动 (\$(date))" >> "$BACKUP_DIR/cron_backup.log"
+
+# [Diagnostic 1.5.6] 捕获错误行号并记录环境
+trap 'echo "❌ ERROR: 脚本在第 \$LINENO 行挂掉了 (Exit Code: \$?)" >> "$BACKUP_DIR/cron_backup.log"' ERR
+echo "DEBUG: 当前 PATH=\$PATH" >> "$BACKUP_DIR/cron_backup.log"
+echo "DEBUG: 当前 Proxy=\$(env | grep -iE 'proxy|http' || echo 'None')" >> "$BACKUP_DIR/cron_backup.log"
+
 TIMESTAMP=\$(date +"%Y%m%d_%H%M%S")
 HOSTNAME=\$(hostname)
 TMP_DIR="/tmp/oc_backup_\${TIMESTAMP}"
@@ -186,8 +192,8 @@ for PART in "\${PART_FILES[@]}"; do
 💡 提示：使用 /rollback 命令可以直接从历史备份恢复。"
     fi
 
-    echo "正在发送卷 \${PART_INDEX}/\${TOTAL_PARTS} ..."
-    RESPONSE=\$(curl -s -X POST "https://api.telegram.org/bot\${BOT_TOKEN}/sendDocument" \\
+    echo "📦 正在上传卷 \${PART_INDEX}/\${TOTAL_PARTS} (size: \$(ls -lh "\$PART" | awk '{print \$5}')) ..." >> "$BACKUP_DIR/cron_backup.log"
+    RESPONSE=\$(curl --max-time 60 -X POST "https://api.telegram.org/bot\${BOT_TOKEN}/sendDocument" \\
       -F chat_id="\${CHAT_ID}" \\
       -F disable_notification="true" \\
       -F document="@\${PART}" \\
@@ -304,7 +310,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.5"
+VERSION = "v1.5.6"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
