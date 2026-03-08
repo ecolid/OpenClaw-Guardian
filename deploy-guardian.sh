@@ -310,13 +310,31 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.7"
+VERSION = "v1.5.8"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
 is_thinking = False
 think_start_time = 0
 think_msg_id = None
+STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
+
+def load_stats():
+    today = time.strftime("%Y-%m-%d")
+    if os.path.exists(STATS_FILE):
+        try:
+            with open(STATS_FILE, "r") as f:
+                s = json.load(f)
+                if s.get("last_reset_date") != today:
+                    s.update({"today_prompt_chars": 0, "today_convs": 0, "today_folds": 0, "last_reset_date": today})
+                return s
+        except: pass
+    return {"total_prompt_chars": 0, "today_prompt_chars": 0, "total_convs": 0, "today_convs": 0, "total_folds": 0, "today_folds": 0, "last_reset_date": today}
+
+def save_stats(s):
+    try:
+        with open(STATS_FILE, "w") as f: json.dump(s, f)
+    except: pass
 
 def send_msg(text, reply_markup=None):
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
@@ -453,6 +471,23 @@ def thinking_monitor():
                     if is_thinking:
                         is_thinking = False
                         update_think_msg(final=True)
+                
+                # --- [Stats Logic 1.5.8] ---
+                if 'pre-prompt:' in line_str and 'promptChars=' in line_str:
+                    try:
+                        import re
+                        pc = int(re.search(r'promptChars=(\d+)', line_str).group(1))
+                        s = load_stats(); s['total_prompt_chars'] += pc; s['today_prompt_chars'] += pc
+                        s['total_convs'] += 1; s['today_convs'] += 1
+                        save_stats(s)
+                    except: pass
+                if 'compactionSummary:' in line_str:
+                    try:
+                        import re
+                        fc = int(re.search(r'compactionSummary:(\d+)', line_str).group(1))
+                        s = load_stats(); s['total_folds'] += fc; s['today_folds'] += fc
+                        save_stats(s)
+                    except: pass
         except: pass
         time.sleep(5)
 
@@ -484,7 +519,8 @@ def set_commands():
         {"command": "logs", "description": "日志中心：查看业务日志或备份自检日志"},
         {"command": "grep", "description": "定向搜索日志并提取上下文 (如 /grep 400)"},
         {"command": "update", "description": "从 GitHub 热更新守护程序代码"},
-        {"command": "update_rollback", "description": "恢复上一版本的守护程序代码"}
+        {"command": "update_rollback", "description": "恢复上一版本的守护程序代码"},
+        {"command": "stats", "description": "查看小龙虾对话与字数统计"}
     ]
     try: requests.post(f"{API_URL}/setMyCommands", json={"commands": commands}, timeout=5)
     except: pass
@@ -496,8 +532,29 @@ def handle_msg(msg):
 
     if text.startswith("/status"):
         send_msg("⏳ 正在采集硬件深层指标，请稍候...")
-        try:
-            # Service Status
+    elif text.startswith("/stats"):
+        s = load_stats()
+        avg_total = s['total_prompt_chars'] / s['total_convs'] if s['total_convs'] else 0
+        avg_today = s['today_prompt_chars'] / s['today_convs'] if s['today_convs'] else 0
+        dash = f'''📊 <b>小龙虾数据看板 (Stats Center)</b>
+-----------------------------------
+📅 <b>今日统计 (Today)</b>
+- 对话次数: <code>{s['today_convs']}</code> 次
+- 字符规模: <code>{s['today_prompt_chars']}</code> Chars
+- 记忆折叠: <code>{s['today_folds']}</code> 次
+- 平均规模: <code>{avg_today:.1f}</code> 字/次
+
+🌎 <b>历史累计 (Total)</b>
+- 总对话数: <code>{s['total_convs']}</code> 次
+- 总字符数: <code>{s['total_prompt_chars']}</code> Chars
+- 总折叠数: <code>{s['total_folds']}</code> 次
+- 平均规模: <code>{avg_total:.1f}</code> 字/次
+-----------------------------------
+<i>注: 字符数包含提示词与上下文，反映 API 消耗强度。</i>'''
+        send_msg(dash)
+        return
+
+    if text.startswith("/status"):
             oc_status = run_cmd("systemctl is-active openclaw").strip().upper()
             oc_emoji = "🟢" if oc_status == "ACTIVE" else "🔴"
             oc_uptime = run_cmd("systemctl show openclaw --property=ActiveEnterTimestamp | awk -F= '{print \$2}'").strip()
