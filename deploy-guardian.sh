@@ -328,7 +328,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.0"
+VERSION = "v1.7.1"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -368,6 +368,19 @@ def save_schedule(s):
         run_cmd("service cron restart || systemctl restart cron || service crond restart || true")
         return True
     except: return False
+
+def get_backup_info():
+    """计算下一次备份的标签和时间"""
+    try:
+        now_h = time.localtime().tm_hour
+        sch = load_schedule()
+        hours = sch["hours"]
+        next_h = hours[0]
+        for h in hours:
+            if h > now_h:
+                next_h = h; break
+        return sch["label"], f"{next_h:02d}:00"
+    except: return "未知计划", "未知时间"
 
 def save_stats(s):
     try:
@@ -494,6 +507,32 @@ def thinking_monitor():
 
     while True:
         try:
+            # --- [Warm Start 1.7.1] 启动回溯：检查是否正在思考中 ---
+            if not is_thinking:
+                check_log = run_cmd("journalctl -u openclaw -n 50 --no-pager")
+                lines = check_log.strip().split('\n')
+                # 倒着找最后一条状态记录
+                for l in reversed(lines):
+                    if 'new=processing' in l and 'run_started' in l:
+                        is_thinking = True
+                        # 估算开始时间（从日志行首提取时间戳，简化版直接用当前，或解析日志）
+                        think_start_time = time.time()
+                        last_shown_time = 0
+                        # 补发一条计时核心，标记为“恢复检测”
+                        resp = requests.post(f"{API_URL}/sendMessage", json={
+                            "chat_id": CHAT_ID, "text": "🦞 <b>检测到小龙虾正在思考中... (启动恢复)</b>\n⏱️ 已耗时: <code>计算中...</code>",
+                            "parse_mode": "HTML", "disable_notification": True
+                        }, timeout=5).json()
+                        if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
+                        threading.Thread(target=typing_loop, daemon=True).start()
+                        def live_ticker():
+                            while is_thinking:
+                                update_think_msg(); time.sleep(1.5)
+                        threading.Thread(target=live_ticker, daemon=True).start()
+                        break
+                    elif 'new=idle' in l and 'run_completed' in l:
+                        break # 最近的状态是空闲，无需恢复
+
             proc = subprocess.Popen("journalctl -f -u openclaw -n 0 --no-pager", shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             while proc.poll() is None:
                 line = proc.stdout.readline()
@@ -658,14 +697,8 @@ def handle_msg(msg):
             cron_job_status = "✅ 已注册" if cron_job else "❌ 未发现任务"
 
             try:
-                now_h = time.localtime().tm_hour
-                sch = load_schedule()
-                schedule = sch["hours"]
-                next_h = schedule[0]
-                for h in schedule:
-                    if h > now_h:
-                        next_h = h; break
-                next_backup_time = f"{next_h:02d}:00"
+                label, next_time = get_backup_info()
+                next_backup_time = next_time
             except: next_backup_time = "计算中..."
 
             if is_thinking:
@@ -921,7 +954,8 @@ def handle_callback(cb):
 
 def main():
     set_commands()
-    send_msg(f"👋 <b>Guardian 守护进程 ({VERSION}) 已启动并接管 OpenClaw！</b>\n随时可以使用 /status 检查状态。")
+    label, next_time = get_backup_info()
+    send_msg(f"👋 <b>Guardian 守护进程 ({VERSION}) 已启动！</b>\n📅 当前计划: <code>{label}</code>\n⏭️ 下次执行: <code>今天 {next_time}</code>\n\n随时可以使用 /status 查看详细水位。")
     threading.Thread(target=health_monitor, daemon=True).start()
     threading.Thread(target=thinking_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
@@ -984,7 +1018,7 @@ fi
 # 从 JSON 提取当前计划的小时 (优先用 Python 提取以防没有 jq)
 HOURS=\$(python3 -c "import json; print(','.join(map(str, json.load(open('\$SCHEDULE_FILE'))['hours'])))" 2>/dev/null || echo "3,7,11,15,19,23")
 
-# 写入 Crontab
+# 写入 Crontab (安全性: crontab -l | grep -v 确保只更新 Guardian 任务，不影响用户自定义的其他 Cron)
 CRON_CMD="0 \$HOURS * * * /bin/bash \$BACKUP_DIR/backup.sh >> \$BACKUP_DIR/cron_backup.log 2>&1"
 (crontab -l 2>/dev/null | grep -v "\$BACKUP_DIR/backup.sh" || true; echo "\$CRON_CMD") | crontab -
 
