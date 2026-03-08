@@ -328,7 +328,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.5"
+VERSION = "v1.7.6"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -493,9 +493,9 @@ def thinking_monitor():
             fold_str = f"\n♻️ 上下文折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
             text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
         else:
-            # 🕺 律动感更强的 Emoji 序列
-            icons = ["🧠", "💭", "⚡", "✨", "🛰️", "⚙️", "⏳", "📡"]
-            icon = icons[elapsed % len(icons)]
+            # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列 (Certainty UI v1.7.6)
+            moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
+            icon = moons[int(time.time() * 2) % len(moons)]
             # 只有当耗时有增加时才显示增量标记，增强确定性
             inc_str = f" (+{delta}s)" if delta > 0 else ""
             text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}"
@@ -541,7 +541,7 @@ def thinking_monitor():
                         threading.Thread(target=typing_loop, daemon=True).start()
                         def live_ticker():
                             while is_thinking:
-                                update_think_msg(); time.sleep(1.5)
+                                update_think_msg(); time.sleep(0.8)
                         threading.Thread(target=live_ticker, daemon=True).start()
                         break
                     elif 'new=idle' in l and 'run_completed' in l:
@@ -852,7 +852,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.5"
+VERSION = "v1.7.6"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -1017,9 +1017,9 @@ def thinking_monitor():
             fold_str = f"\n♻️ 上下文折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
             text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
         else:
-            # 🕺 律动感更强的 Emoji 序列
-            icons = ["🧠", "💭", "⚡", "✨", "🛰️", "⚙️", "⏳", "📡"]
-            icon = icons[elapsed % len(icons)]
+            # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列 (Certainty UI v1.7.6)
+            moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
+            icon = moons[int(time.time() * 2) % len(moons)]
             # 只有当耗时有增加时才显示增量标记，增强确定性
             inc_str = f" (+{delta}s)" if delta > 0 else ""
             text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}"
@@ -1065,7 +1065,7 @@ def thinking_monitor():
                         threading.Thread(target=typing_loop, daemon=True).start()
                         def live_ticker():
                             while is_thinking:
-                                update_think_msg(); time.sleep(1.5)
+                                update_think_msg(); time.sleep(0.8)
                         threading.Thread(target=live_ticker, daemon=True).start()
                         break
                     elif 'new=idle' in l and 'run_completed' in l:
