@@ -328,7 +328,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.7.1"
+VERSION = "v1.7.2"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -1012,15 +1012,15 @@ systemctl restart openclaw-guardian
 
 # 自动迁移/初始化 schedule.json
 SCHEDULE_FILE="$BACKUP_DIR/schedule.json"
-if [ ! -f "\$SCHEDULE_FILE" ]; then
-    echo '{"hours": [3, 7, 11, 15, 19, 23], "label": "每 4 小时 (错峰)"}' > "\$SCHEDULE_FILE"
+if [ ! -f "$SCHEDULE_FILE" ]; then
+    echo '{"hours": [3, 7, 11, 15, 19, 23], "label": "每 4 小时 (错峰)"}' > "$SCHEDULE_FILE"
 fi
 # 从 JSON 提取当前计划的小时 (优先用 Python 提取以防没有 jq)
-HOURS=\$(python3 -c "import json; print(','.join(map(str, json.load(open('\$SCHEDULE_FILE'))['hours'])))" 2>/dev/null || echo "3,7,11,15,19,23")
+HOURS=$(python3 -c "import json; print(','.join(map(str, json.load(open('$SCHEDULE_FILE'))['hours'])))" 2>/dev/null || echo "3,7,11,15,19,23")
 
 # 写入 Crontab (安全性: crontab -l | grep -v 确保只更新 Guardian 任务，不影响用户自定义的其他 Cron)
-CRON_CMD="0 \$HOURS * * * /bin/bash \$BACKUP_DIR/backup.sh >> \$BACKUP_DIR/cron_backup.log 2>&1"
-(crontab -l 2>/dev/null | grep -v "\$BACKUP_DIR/backup.sh" || true; echo "\$CRON_CMD") | crontab -
+CRON_CMD="0 $HOURS * * * /bin/bash $BACKUP_DIR/backup.sh >> $BACKUP_DIR/cron_backup.log 2>&1"
+(crontab -l 2>/dev/null | grep -v "$BACKUP_DIR/backup.sh" || true; echo "$CRON_CMD") | crontab -
 
 # 强制重启一次 Cron 服务以激活新配置
 service cron restart || systemctl restart cron || service crond restart || true
