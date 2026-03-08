@@ -328,8 +328,8 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.6.6"
+VERSION = "v1.7.0"
+SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -350,6 +350,24 @@ def load_stats():
                 return s
         except: pass
     return {"total_prompt_chars": 0, "today_prompt_chars": 0, "total_convs": 0, "today_convs": 0, "total_folds": 0, "today_folds": 0, "last_reset_date": today}
+
+def load_schedule():
+    default = {"hours": [3, 7, 11, 15, 19, 23], "label": "每 4 小时 (错峰)"}
+    if os.path.exists(SCHEDULE_FILE):
+        try:
+            with open(SCHEDULE_FILE, "r") as f: return json.load(f)
+        except: pass
+    return default
+
+def save_schedule(s):
+    try:
+        with open(SCHEDULE_FILE, "w") as f: json.dump(s, f)
+        h_str = ",".join(map(str, s["hours"]))
+        cmd = f"0 {h_str} * * * /bin/bash {BACKUP_DIR}/backup.sh >> {BACKUP_DIR}/cron_backup.log 2>&1"
+        run_cmd(f"(crontab -l 2>/dev/null | grep -v '{BACKUP_DIR}/backup.sh' || true; echo '{cmd}') | crontab -")
+        run_cmd("service cron restart || systemctl restart cron || service crond restart || true")
+        return True
+    except: return False
 
 def save_stats(s):
     try:
@@ -550,6 +568,7 @@ def set_commands():
         
         # ⚙️ 系统维护 (Control)
         {"command": "restart", "description": "🔄 重启后端服务 (清理内存/更新配置)"},
+        {"command": "schedule", "description": "⏰ 计划调度：调整自动备份频率"},
         {"command": "update", "description": "📥 从 GitHub 获取并更新守护程序 (OTA)"},
         {"command": "update_rollback", "description": "💊 守护程序后悔药 (恢复上一版本大脑)"}
     ]
@@ -640,8 +659,9 @@ def handle_msg(msg):
 
             try:
                 now_h = time.localtime().tm_hour
-                schedule = [3, 7, 11, 15, 19, 23]
-                next_h = 3 
+                sch = load_schedule()
+                schedule = sch["hours"]
+                next_h = schedule[0]
                 for h in schedule:
                     if h > now_h:
                         next_h = h; break
@@ -769,6 +789,16 @@ fi
             size_str = v.get('size', '未知大小')
             buttons.append([{"text": f"🕒 {v['time']} | 📦 {size_str}", "callback_data": f"rb_{v.get('msg_id', i)}"}])
         send_msg("请选择要回滚的时间点：\n<i>⚠️ 警告：这将覆盖当前所有配置和记忆！</i>", {"inline_keyboard": buttons})
+    elif text.startswith("/schedule"):
+        s = load_schedule()
+        buttons = [
+            [{"text": "⏰ 每 4 小时 (标准: 0/4/8...)", "callback_data": "sch_4h_std"}],
+            [{"text": "⏰ 每 4 小时 (错峰: 3/7/11...)", "callback_data": "sch_4h_off"}],
+            [{"text": "⏰ 每 6 小时 (0/6/12/18)", "callback_data": "sch_6h"}],
+            [{"text": "⏰ 每 12 小时 (0/12)", "callback_data": "sch_12h"}],
+            [{"text": "⏰ 每天一次 (凌晨 00:00)", "callback_data": "sch_daily"}]
+        ]
+        send_msg(f"📅 <b>备份计划调度器</b>\n当前设置: <code>{s['label']}</code>\n请选择您希望的自动备份频率：", {"inline_keyboard": buttons})
 
 def handle_callback(cb):
     data = cb["data"]
@@ -810,6 +840,22 @@ def handle_callback(cb):
                 grep_lock.release()
                 
         threading.Thread(target=do_quick_grep).start()
+        return
+
+    if data.startswith("sch_"):
+        mode = data[4:]
+        modes = {
+            "4h_std": {"hours": [0,4,8,12,16,20], "label": "每 4 小时 (标准)"},
+            "4h_off": {"hours": [3,7,11,15,19,23], "label": "每 4 小时 (错峰)"},
+            "6h": {"hours": [0,6,12,18], "label": "每 6 小时"},
+            "12h": {"hours": [0,12], "label": "每 12 小时"},
+            "daily": {"hours": [0], "label": "每天一次 (凌晨)"}
+        }
+        if mode in modes:
+            if save_schedule(modes[mode]):
+                send_msg(f"✅ <b>计划更新成功！</b>\n新的备份周期: <code>{modes[mode]['label']}</code>\n系统 crontab 已同步刷新。")
+            else:
+                send_msg("❌ 计划更新失败，请检查文件权限。")
         return
 
     if data == "cancel":
@@ -930,9 +976,17 @@ systemctl disable sysmonitor 2>/dev/null || true
 
 systemctl restart openclaw-guardian
 
-# 每 4 小时执行一次备份 (定制: 11点、15点等 4小时步进)
-CRON_CMD="0 3,7,11,15,19,23 * * * /bin/bash \$BACKUP_DIR/backup.sh >> \$BACKUP_DIR/cron_backup.log 2>&1"
-(crontab -l 2>/dev/null | grep -v "$BACKUP_DIR/backup.sh" || true; echo "$CRON_CMD") | crontab -
+# 自动迁移/初始化 schedule.json
+SCHEDULE_FILE="$BACKUP_DIR/schedule.json"
+if [ ! -f "\$SCHEDULE_FILE" ]; then
+    echo '{"hours": [3, 7, 11, 15, 19, 23], "label": "每 4 小时 (错峰)"}' > "\$SCHEDULE_FILE"
+fi
+# 从 JSON 提取当前计划的小时 (优先用 Python 提取以防没有 jq)
+HOURS=\$(python3 -c "import json; print(','.join(map(str, json.load(open('\$SCHEDULE_FILE'))['hours'])))" 2>/dev/null || echo "3,7,11,15,19,23")
+
+# 写入 Crontab
+CRON_CMD="0 \$HOURS * * * /bin/bash \$BACKUP_DIR/backup.sh >> \$BACKUP_DIR/cron_backup.log 2>&1"
+(crontab -l 2>/dev/null | grep -v "\$BACKUP_DIR/backup.sh" || true; echo "\$CRON_CMD") | crontab -
 
 # 强制重启一次 Cron 服务以激活新配置
 service cron restart || systemctl restart cron || service crond restart || true
