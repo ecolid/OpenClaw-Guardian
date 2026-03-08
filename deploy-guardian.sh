@@ -329,13 +329,14 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.6.1"
+VERSION = "v1.6.2"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
 is_thinking = False
 think_start_time = 0
 think_msg_id = None
+last_shown_time = 0
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
 
 def load_stats():
@@ -440,20 +441,26 @@ def thinking_monitor():
     global is_thinking, think_start_time, think_msg_id
     
     def update_think_msg(final=False):
-        global think_msg_id
+        global think_msg_id, last_shown_time
         if not think_msg_id: return
-        elapsed = int(time.time() - think_start_time)
+        now_ts = time.time()
+        elapsed = int(now_ts - think_start_time)
+        delta = elapsed - last_shown_time
+        
         if final:
             text = f"✅ <b>小龙虾思考完毕！</b>\n📊 总耗时: <code>{elapsed}</code> 秒"
         else:
             icons = ["🧠", "⏳", "📡", "⚡"]
             icon = icons[elapsed % len(icons)]
-            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒"
+            # 只有当耗时有增加时才显示增量标记，增强确定性
+            inc_str = f" (+{delta}s)" if delta > 0 else ""
+            text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}"
         
         try:
-            requests.post(f"{API_URL}/editMessageText", json={
+            resp = requests.post(f"{API_URL}/editMessageText", json={
                 "chat_id": CHAT_ID, "message_id": think_msg_id, "text": text, "parse_mode": "HTML"
-            }, timeout=5)
+            }, timeout=5).json()
+            if resp.get("ok"): last_shown_time = elapsed
             if final:
                 time.sleep(5)
                 requests.post(f"{API_URL}/deleteMessage", json={"chat_id": CHAT_ID, "message_id": think_msg_id}, timeout=5)
@@ -476,15 +483,16 @@ def thinking_monitor():
                 if 'new=processing' in line_str and 'run_started' in line_str:
                     is_thinking = True
                     think_start_time = time.time()
+                    last_shown_time = 0
                     resp = requests.post(f"{API_URL}/sendMessage", json={
-                        "chat_id": CHAT_ID, "text": "Lobster 正在思考中... 🧠\n⏱️ 已耗时: <code>0.0</code> 秒",
+                        "chat_id": CHAT_ID, "text": "Lobster 正在思考中... 🧠\n⏱️ 已耗时: <code>0</code> 秒",
                         "parse_mode": "HTML", "disable_notification": True
                     }, timeout=5).json()
                     if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
                     threading.Thread(target=typing_loop, daemon=True).start()
                     def live_ticker():
                         while is_thinking:
-                            update_think_msg(); time.sleep(1.0)
+                            update_think_msg(); time.sleep(2.0)
                     threading.Thread(target=live_ticker, daemon=True).start()
                 elif 'new=idle' in line_str and 'run_completed' in line_str:
                     if is_thinking:
