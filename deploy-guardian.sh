@@ -325,7 +325,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.4"
+VERSION = "v1.8.5"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -603,34 +603,37 @@ def ota_monitor():
     """后台轮询 GitHub 检查更新"""
     notified_version = VERSION
     while True:
-        time.sleep(600)
         try:
-            r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=10)
+            r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh", timeout=15)
             if r.status_code == 200:
-                for line in r.text.split('\n'):
-                    if line.startswith('VERSION = "'):
-                        remote_version = line.split('"')[1]
-                        if remote_version != VERSION and remote_version != notified_version:
-                            # Fetch changelog (v1.8.0)
-                            cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
-                            notes = ""
-                            if cl_r.status_code == 200:
-                                cl_lines = cl_r.text.split('\n')
-                                p = False
-                                for l in cl_lines:
-                                    if l.strip().startswith('## [v'):
-                                        if p: break
-                                        p = True
-                                        continue
-                                    if p: notes += l + '\n'
-                            notes = notes.strip()[:500]
-                            changelog_str = f"\n\n📝 <b>新版更新内容:</b>\n<pre>{html.escape(notes)}</pre>" if notes else ""
-                            
-                            btn = [[{"text": "📥 立即热更新系统 (OTA)", "callback_data": "ota_update"}]]
-                            send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>{changelog_str}\n\n点击下方按钮或发送 /update 立即热部署。", {"inline_keyboard": btn})
-                            notified_version = remote_version
-                        break
-        except: pass
+                remote_version = None
+                # 使用正则更稳健地提取版本号
+                v_match = re.search(r'VERSION = "(.*?)"', r.text)
+                if v_match:
+                    remote_version = v_match.group(1)
+                    if remote_version != VERSION and remote_version != notified_version:
+                        # 获取更新日志 (Fetch latest changelog entry)
+                        cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
+                        notes = ""
+                        if cl_r.status_code == 200:
+                            p = False
+                            for l in cl_r.text.split('\n'):
+                                if l.strip().startswith('## [v'):
+                                    if p: break
+                                    p = True; continue
+                                if p: notes += l + '\n'
+                        
+                        notes = notes.strip()[:500]
+                        changelog_str = f"\n\n📝 <b>新版更新内容:</b>\n<pre>{html.escape(notes)}</pre>" if notes else ""
+                        
+                        btn = [[{"text": "📥 立即查看并准备更新", "callback_data": "ota_update"}]]
+                        send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>{changelog_str}\n\n建议点击下方按钮查看详情并进行热更新。", {"inline_keyboard": btn})
+                        notified_version = remote_version
+        except Exception as e:
+            # 仅在调试时开启，平时静默
+            # print(f"OTA Check error: {e}")
+            pass
+        time.sleep(600)
 
 # --- 指令处理 ---
 def set_commands():
