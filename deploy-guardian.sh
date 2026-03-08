@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.9.7"
+VERSION="v1.9.8"
 set -e
 
 # =================================================================
@@ -334,7 +334,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.9.7"
+VERSION = "v1.9.8"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -594,9 +594,18 @@ def thinking_monitor():
                 session_warn = state.get("warn", False)
                 session_error = state.get("error")
             os.remove(RESUME_FILE) # 仅恢复一次
-            send_msg("🔄 <b>小龙虾无感重启完成</b>: 已成功找回之前的思考进度，继续监听日志...", disable_notification=True)
             
-            # [Fix v1.9.6] 重启后立刻恢复动画和输入状态
+            # [Fix v1.9.8] 视觉强化：发送崭新消息置于对话底端，取代旧消息 ID
+            resp = requests.post(f"{API_URL}/sendMessage", json={
+                "chat_id": CHAT_ID, 
+                "text": "🔄 <b>无感重启完成</b>: 已成功找回进度，正在尝试置底恢复...", 
+                "parse_mode": "HTML", "disable_notification": True
+            }, timeout=10).json()
+            
+            if resp.get("ok"):
+                think_msg_id = resp["result"]["message_id"]
+            
+            # 重启后立刻恢复动画和输入状态
             threading.Thread(target=typing_loop, daemon=True).start()
             def live_ticker():
                 while is_thinking:
@@ -1071,6 +1080,16 @@ def handle_callback(cb):
         return
 
     def perform_ota():
+        # [Fix v1.9.8] 状态冻结反馈：告诉用户数据已存，不再沉默
+        if is_thinking and think_msg_id:
+            try:
+                requests.post(f"{API_URL}/editMessageText", json={
+                    "chat_id": CHAT_ID, "message_id": think_msg_id,
+                    "text": "📦 <b>当前思考状态已安全固化</b>\n系统正在进行热更新，新版上线后将自动在此置底接管进度...",
+                    "parse_mode": "HTML"
+                }, timeout=5)
+            except: pass
+        
         save_resume_state() # 重启前存档 (Zero Loss)
         send_msg("⚙️ <b>指令已确认，正在执行热更新部署...</b>\n请稍候，系统将固化当前状态并在重启后自动接管进度。")
         run_cmd(f"cd {BACKUP_DIR} && cp backup.sh backup.sh.bak && cp guardian-bot.py guardian-bot.py.bak")
