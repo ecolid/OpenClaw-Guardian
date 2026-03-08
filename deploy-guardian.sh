@@ -325,7 +325,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.8.5"
+VERSION = "v1.8.6"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -490,10 +490,9 @@ def thinking_monitor():
             fold_str = f"\n♻️ 上下文折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
             text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{fold_str}"
         else:
-            # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列 (Certainty UI v1.7.6)
+            # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
             moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
             icon = moons[int(time.time() * 2) % len(moons)]
-            # 只有当耗时有增加时才显示增量标记，增强确定性
             inc_str = f" (+{delta}s)" if delta > 0 else ""
             text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}"
         
@@ -503,8 +502,7 @@ def thinking_monitor():
             }, timeout=5).json()
             if resp.get("ok"): last_shown_time = elapsed
             if final:
-                time.sleep(5)
-                requests.post(f"{API_URL}/deleteMessage", json={"chat_id": CHAT_ID, "message_id": think_msg_id}, timeout=5)
+                # v1.8.6: 取消自动删除，让消息作为“对话回执”永久保留
                 think_msg_id = None
         except: pass
 
