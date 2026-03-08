@@ -329,7 +329,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.6.2"
+VERSION = "v1.6.3"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -537,15 +537,20 @@ def ota_monitor():
 # --- 指令处理 ---
 def set_commands():
     commands = [
-        {"command": "status", "description": "查看服务器状态与内存占用"},
-        {"command": "backup", "description": "立即全量备份机器人配置"},
-        {"command": "rollback", "description": "一键回滚到历史快照"},
-        {"command": "restart", "description": "重启机器人的后端进程"},
-        {"command": "logs", "description": "日志中心：查看业务日志或备份自检日志"},
-        {"command": "grep", "description": "定向搜索日志并提取上下文 (如 /grep 400)"},
-        {"command": "update", "description": "从 GitHub 热更新守护程序代码"},
-        {"command": "update_rollback", "description": "恢复上一版本的守护程序代码"},
-        {"command": "stats", "description": "查看小龙虾对话与字数统计"}
+        # 🔍 状态与监控 (Metrics)
+        {"command": "status", "description": "📊 系统核心状态 (硬件/备份/下次预定)"},
+        {"command": "stats", "description": "🦞 小龙虾数据看板 (字数统计/对话/折叠)"},
+        {"command": "logs", "description": "📄 日志查询中心 (业务/备份双通道)"},
+        {"command": "grep", "description": "🔍 故障定向查询 (DataInspection/Timeout/OOM)"},
+        
+        # 📦 备份与存储 (Storage)
+        {"command": "backup", "description": "📦 立即手动执行全量备份"},
+        {"command": "rollback", "description": "⏪ 恢复历史快照 (带二次确认)"},
+        
+        # ⚙️ 系统维护 (Control)
+        {"command": "restart", "description": "🔄 重启后端服务 (清理内存/更新配置)"},
+        {"command": "update", "description": "📥 从 GitHub 获取并更新守护程序 (OTA)"},
+        {"command": "update_rollback", "description": "💊 守护程序后悔药 (恢复上一版本大脑)"}
     ]
     try: requests.post(f"{API_URL}/setMyCommands", json={"commands": commands}, timeout=5)
     except: pass
