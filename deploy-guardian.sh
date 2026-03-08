@@ -305,7 +305,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.3"
+VERSION = "v1.5.4"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
@@ -777,9 +777,12 @@ systemctl disable sysmonitor 2>/dev/null || true
 
 systemctl restart openclaw-guardian
 
-# 每 4 小时执行一次备份 (增加环境声明，重定向日志以供排错)
-CRON_CMD="0 */4 * * * SHELL=/bin/bash PATH=/usr/local/bin:/usr/bin:/bin $BACKUP_DIR/backup.sh >> $BACKUP_DIR/cron_backup.log 2>&1"
+# 每 4 小时执行一次备份 (改用最高兼容性的显式小时列表，并强制指定 bash 执行)
+CRON_CMD="0 0,4,8,12,16,20 * * * /bin/bash $BACKUP_DIR/backup.sh >> $BACKUP_DIR/cron_backup.log 2>&1"
 (crontab -l 2>/dev/null | grep -v "$BACKUP_DIR/backup.sh" || true; echo "$CRON_CMD") | crontab -
+
+# 强制重启一次 Cron 服务以激活新配置
+service cron restart || systemctl restart cron || service crond restart || true
 
 echo ""
 echo -e "${CYAN}=================================================================${PLAIN}"
