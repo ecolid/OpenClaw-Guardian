@@ -237,6 +237,25 @@ jq -c \\
 
 echo "✅ 备份成功并记录历史 (\$(date))" >> "$BACKUP_DIR/cron_backup.log"
 
+# --- [Cloud Sync 1.6.0] 元数据私有云同步 ---
+echo "🔐 正在同步元数据至云端索引..." >> "\$BACKUP_DIR/cron_backup.log"
+METADATA_PKG="\${TMP_DIR}/Guardian_Sync_\${TIMESTAMP}.tar.gz"
+STATS_FILE="\$BACKUP_DIR/stats.json"
+
+# 打包索引与统计
+tar -czf "\${METADATA_PKG}" -C "\$BACKUP_DIR" backup-history.json stats.json 2>/dev/null || true
+
+if [ -f "\${METADATA_PKG}" ]; then
+    curl --max-time 30 -X POST "https://api.telegram.org/bot\${BOT_TOKEN}/sendDocument" \\
+      -F chat_id="\${CHAT_ID}" \\
+      -F disable_notification="true" \\
+      -F document="@\${METADATA_PKG}" \\
+      -F caption="🔐 [Guardian 云端同步包] 
+- 类型: 元数据索引 (Metadata)
+- 时间: \$(date +"%Y-%m-%d %H:%M:%S")
+💡 提示：此文件仅包含备份清单与字数统计，不含大型备份文件。请妥善保存，用于异地恢复索引。" >> "\$BACKUP_DIR/cron_backup.log" 2>&1
+fi
+
 rm -rf "\${TMP_DIR}"
 echo "清理完毕。"
 EOF
@@ -310,7 +329,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-VERSION = "v1.5.9"
+VERSION = "v1.6.0"
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
