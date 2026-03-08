@@ -2,7 +2,7 @@
 > **为基于阿里百炼 (DASHSCOPE) 的 AI 智能体 [OpenClaw](https://github.com/vual/OpenClaw) 量身打造的极客级运维框架。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version: v1.7.2](https://img.shields.io/badge/Version-v1.7.2-blue.svg)](https://github.com/ecolid/OpenClaw-Guardian/releases)
+[![Version: v1.8.3](https://img.shields.io/badge/Version-v1.8.3-blue.svg)](https://github.com/ecolid/OpenClaw-Guardian/releases)
 
 ---
 
@@ -21,8 +21,8 @@
 
 #### 💃 灵魂舞者：思维状态追踪器 (Thinking Tracer)
 告别猜测！当 AI 开始处理你的请求时，Telegram 会同步弹出一个动态计时器：
-- **动态 Emoji 动画**：8 段循环律动图标 (🧠 💭 ⚡ ✨...)，提供即时的系统活跃感。
-- **精准赶路计时**：采用 +Ns 动态增量算法，即使网络延迟波动，时间显示依然逻辑严密。
+- **1.0s 稳定节奏**：完全对齐物理时钟，在任何网络环境下都保持百分百顺滑的步进效果。
+- **动态 Emoji 动画**：8 段循环律动图标 (🌑 🌒 🌓 🌔...)，提供即时的系统活跃感。
 - **启动检测恢复**：即便 Guardian 意外重启，它也会自动回溯日志，瞬间找回正在进行的思考状态。
 
 #### 🕹️ 智能管理中心：全交互式运维
