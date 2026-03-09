@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.2"
+VERSION="v1.11.3"
 set -e
 
 # =================================================================
@@ -359,7 +359,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 BOT_TOKEN_2 = "${TG_BOT_TOKEN_2}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.11.1"
+VERSION = "v1.11.3"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -380,24 +380,46 @@ API_URL_1 = f"https://api.telegram.org/bot{BOT_TOKEN}"
 API_URL_2 = f"https://api.telegram.org/bot{BOT_TOKEN_2}" if BOT_TOKEN_2 else None
 grep_lock = threading.Lock()
 ux_threads_active = False 
-bot_lock = threading.Lock() # [v1.11.0] 保护 CURRENT_BOT 切换
 
-def get_api_url():
-    global CURRENT_BOT
-    if CURRENT_BOT == 2 and API_URL_2: return API_URL_2
-    return API_URL_1
+# [v1.11.3] 智能熔断定时器
+bot1_banned_until = 0.0
+bot2_banned_until = 0.0
+bot_lock = threading.Lock() 
 
-def switch_bot():
-    """触发机器人秒级切换"""
-    global CURRENT_BOT
+def get_api_url(force_prefer=None):
+    """
+    [v1.11.3] 智能路由算法：精准避让“小黑屋”
+    1. 优先采用 Bot 1 (主机)
+    2. 如果 Bot 1 正在封禁期内，自动跳过走 Bot 2 (副机)
+    3. 如果 Bot 2 也正在封禁，返回主/副中较早解封的一个进行硬试
+    """
+    global bot1_banned_until, bot2_banned_until
+    now = time.time()
+    
     with bot_lock:
-        if CURRENT_BOT == 1 and API_URL_2:
-            CURRENT_BOT = 2
-            return True
-        elif CURRENT_BOT == 2:
-            CURRENT_BOT = 1
-            return True
-    return False
+        if force_prefer == 1: return API_URL_1
+        if force_prefer == 2 and API_URL_2: return API_URL_2
+        
+        # 判定 Bot 1 是否可用
+        bot1_ready = now >= bot1_banned_until
+        # 判定 Bot 2 是否可用
+        bot2_ready = (API_URL_2 is not None) and (now >= bot2_banned_until)
+        
+        if bot1_ready: return API_URL_1
+        if bot2_ready: return API_URL_2
+        
+        # 如果都在封禁：挑个早点出来的
+        if API_URL_2 and bot2_banned_until < bot1_banned_until:
+            return API_URL_2
+        return API_URL_1
+
+def mark_bot_banned(api_url, retry_after):
+    """记录特定 Bot 的入狱时间"""
+    global bot1_banned_until, bot2_banned_until
+    with bot_lock:
+        target_ts = time.time() + retry_after
+        if api_url == API_URL_1: bot1_banned_until = target_ts
+        elif api_url == API_URL_2: bot2_banned_until = target_ts
 
 def v_tuple(v_str):
     """将版本号(如 v1.9.7)转换为可比较的元组 (1, 9, 7)"""
@@ -467,29 +489,29 @@ def save_stats(s):
     except: pass
 
 def send_msg(text, reply_markup=None, disable_notification=False):
-    # [v1.11.0] 消息合规性检查：截断 4096 字符
+    # [v1.11.0] 消息合规性检查
     if len(text) > 4000: text = text[:4000] + "\n...(内容过长已截断)..."
     
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_notification": disable_notification}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     
-    try:
-        url = f"{get_api_url()}/sendMessage"
-        r = requests.post(url, json=payload, timeout=10)
-        
-        # [v1.11.0] 429 熔断切换逻辑
-        if r.status_code == 429:
-            retry_after = r.json().get("parameters", {}).get("retry_after", 5)
-            if switch_bot():
-                # 使用备用机器人重发通知
-                new_url = f"{get_api_url()}/sendMessage"
-                warn_text = f"🚨 <b>核心警报：主机器人已触发限流！</b>\n当前避让时长: <code>{retry_after}s</code>\n备用卫士已接管通讯，监控不受影响。"
-                requests.post(new_url, json={"chat_id": CHAT_ID, "text": warn_text, "parse_mode": "HTML"}, timeout=5)
-                return requests.post(new_url, json=payload, timeout=10)
-            else:
-                time.sleep(retry_after)
-                return requests.post(url, json=payload, timeout=10)
-    except: pass
+    # [v1.11.3] 智能链条式发送
+    attempt_urls = [get_api_url()] # 获取最优路径
+    if API_URL_2 and attempt_urls[0] == API_URL_1: attempt_urls.append(API_URL_2)
+    elif attempt_urls[0] == API_URL_2: attempt_urls.append(API_URL_1)
+
+    for url in attempt_urls:
+        try:
+            r = requests.post(f"{url}/sendMessage", json=payload, timeout=10)
+            if r.status_code == 429:
+                retry_after = r.json().get("parameters", {}).get("retry_after", 5)
+                mark_bot_banned(url, retry_after)
+                continue # 主机封了，立即试下一个
+            if r.status_code == 200: return r # 成功
+        except: continue
+    
+    # 如果全军覆没，最后挣扎一下
+    time.sleep(2); return None
 
 def run_cmd(cmd, timeout_sec=None):
     try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=timeout_sec)
