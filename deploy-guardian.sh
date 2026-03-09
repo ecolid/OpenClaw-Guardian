@@ -45,7 +45,7 @@ fi
 # 1. 主 Bot Token 检查
 if [ -z "$TG_BOT_TOKEN" ]; then
     while true; do
-        read -p "请输入你的 Telegram 主 Bot Token (例如 123456789:ABC...): " TG_BOT_TOKEN
+        read -p "请输入你的 Telegram 主 Bot Token (例如 123456789:ABC...): " TG_BOT_TOKEN < /dev/tty
         if [[ "$TG_BOT_TOKEN" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
             break
         else
@@ -54,14 +54,21 @@ if [ -z "$TG_BOT_TOKEN" ]; then
     done
 fi
 
-# 2. 备用 Bot Token 检查 (v1.11.1 交互增强)
+# 2. 备用 Bot Token 检查 (v1.11.2 增强: 强制 TTY 与可视倒计时)
 if [ -z "$TG_BOT_TOKEN_2" ]; then
     echo -e "${YELLOW}提示: 您可以配置备用机器人以应对 Tele 限流封禁。${PLAIN}"
-    echo -n "按 [2] 键进入备用 Bot 配置 (2秒后将自动跳过): "
-    read -n 1 -t 2 CONFIRM_2 || true
-    echo ""
+    echo -ne "按 [${GREEN}2${PLAIN}] 键进入备用 Bot 配置 (倒计时: "
+    
+    CONFIRM_2=""
+    # 模拟倒计时交互
+    for i in 2 1; do
+        echo -ne "${CYAN}$i${PLAIN}.. "
+        read -n 1 -t 1 char < /dev/tty && CONFIRM_2=$char && break || true
+    done
+    echo -e ")"
+
     if [ "$CONFIRM_2" == "2" ]; then
-        read -p "请输入备用 Bot Token: " TG_BOT_TOKEN_2
+        read -p "请输入备用 Bot Token: " TG_BOT_TOKEN_2 < /dev/tty
         if [[ ! "$TG_BOT_TOKEN_2" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
             log_warn "备用 Token 格式不正确，本次将跳过备份链路加固。"
             TG_BOT_TOKEN_2=""
@@ -72,7 +79,7 @@ fi
 # 3. Chat ID 检查
 if [ -z "$TG_CHAT_ID" ]; then
     while true; do
-        read -p "请输入接收通知的 Telegram Chat ID (你的个人数字ID，例如 12345678): " TG_CHAT_ID
+        read -p "请输入接收通知的 Telegram Chat ID (你的个人数字ID，例如 12345678): " TG_CHAT_ID < /dev/tty
         if [[ "$TG_CHAT_ID" =~ ^[0-9]+$ || "$TG_CHAT_ID" =~ ^-[0-9]+$ ]]; then
             break
         else
@@ -86,7 +93,7 @@ echo "TG_BOT_TOKEN=\"$TG_BOT_TOKEN\"" > "$ENV_FILE"
 echo "TG_BOT_TOKEN_2=\"$TG_BOT_TOKEN_2\"" >> "$ENV_FILE"
 echo "TG_CHAT_ID=\"$TG_CHAT_ID\"" >> "$ENV_FILE"
 
-log_info "配置完成，准备开始安装环境..."
+log_info "配置完毕，准备开始安装环境..."
 
 # =================================================================
 # 1. 前置准备
