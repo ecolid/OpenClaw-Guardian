@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.11"
+VERSION="v1.11.12"
 set -e
 
 # =================================================================
@@ -655,7 +655,8 @@ def update_think_msg(final=False):
         
         inc_str = f" (+{delta}s)" if delta > 0 else ""
         scale_live = f" | 📊 规模: <code>{session_scale/1000:.1f}k</code>" if session_scale > 0 else ""
-        text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{scale_live}{tool_live}{err_live}"
+        chars_live = f" | 🎟️ 消耗: <code>{session_chars:,}</code>" if session_chars > 0 else ""
+        text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{scale_live}{chars_live}{tool_live}{err_live}"
     
     try:
         url = f"{get_api_url()}/editMessageText"
