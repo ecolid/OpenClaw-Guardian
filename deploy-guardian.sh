@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.6"
+VERSION="v1.11.7"
 set -e
 
 # =================================================================
@@ -366,6 +366,7 @@ STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
 CURRENT_BOT_INDEX = 1 # [v1.11.5] 粘性路由索引
 BOT_BANNED_UNTIL = {} # {api_url: timestamp}
+LAST_UPDATE_EVENT = 0 # [v1.11.7] OTA 更新防重锁时间戳
 
 TOOL_MAP = {
     "web_search": "搜索", 
@@ -386,12 +387,13 @@ ux_threads_active = False
 bot_lock = threading.Lock() 
 
 def test_bot_health(idx):
-    """测试指定序号机器人的健康度 (返回: (是否可用, 报错原因))"""
+    """测试指定序号机器人的健康度 (v1.11.7 升级为行为探测)"""
     token = BOT_TOKEN if idx == 1 else BOT_TOKEN_2
     if not token: return False, "未配置 Token"
     url = f"https://api.telegram.org/bot{token}"
     try:
-        r = requests.get(f"{url}/getMe", timeout=5)
+        # [v1.11.7] 使用 sendChatAction 代替 getMe，确保“发消息”权限正常
+        r = requests.post(f"{url}/sendChatAction", json={"chat_id": CHAT_ID, "action": "typing"}, timeout=5)
         if r.status_code == 200:
             return True, None
         elif r.status_code == 429:
@@ -511,22 +513,20 @@ def send_msg(text, reply_markup=None, disable_notification=False):
     api_url = get_api_url()
     try:
         r = requests.post(f"{api_url}/sendMessage", json=payload, timeout=10)
-        # 粘性降级：仅在当前 Bot 彻底出事时，且备份可用，才执行跳过
         if r.status_code == 429:
             retry_after = r.json().get("parameters", {}).get("retry_after", 30)
             mark_bot_banned(api_url, retry_after)
             
-            # 只有在另一个 Bot 健康时才自动切流，否则保持现状报报错
+            is_startup = text.startswith("�")
+            old_idx = CURRENT_BOT_INDEX
             other_idx = 2 if CURRENT_BOT_INDEX == 1 else 1
+
             if test_bot_health(other_idx)[0]:
-                old_idx = CURRENT_BOT_INDEX
                 CURRENT_BOT_INDEX = other_idx
-                # 在新通道补发一条切流通知
+                msg_body = f"🚨 <b>链路自动备灾</b>: Bot #{old_idx} 受限，由于处于启动阶段，已切换至 Bot #{CURRENT_BOT_INDEX}。" if is_startup else f"🚨 <b>链路自动备灾</b>: Bot #{old_idx} 被限流 {retry_after}s，已切至 Bot #{CURRENT_BOT_INDEX}。\n\n历史消息: {text}"
                 new_url = f"{get_api_url()}/sendMessage"
                 requests.post(new_url, json={
-                    "chat_id": CHAT_ID, 
-                    "text": f"🚨 <b>链路自动备灾</b>: Bot #{old_idx} 被限流 {retry_after}s，已切至 Bot #{CURRENT_BOT_INDEX}。\n\n历史消息: {text}",
-                    "parse_mode": "HTML"
+                    "chat_id": CHAT_ID, "text": msg_body, "parse_mode": "HTML"
                 }, timeout=10)
             return
         return r
@@ -1254,7 +1254,14 @@ def handle_callback(cb):
         return
 
     def perform_ota():
-        # [Fix v1.9.8] 状态冻结反馈：告诉用户数据已存，不再沉默
+        global LAST_UPDATE_EVENT
+        now = time.time()
+        # [v1.11.7] 防重锁兜底：30秒内禁止重复点击
+        if now - LAST_UPDATE_EVENT < 30:
+            return
+        LAST_UPDATE_EVENT = now
+        
+        # [Fix v1.9.8] 状态冻结反馈
         if is_thinking and think_msg_id:
             try:
                 requests.post(f"{get_api_url()}/editMessageText", json={
