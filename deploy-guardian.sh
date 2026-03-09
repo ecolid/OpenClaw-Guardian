@@ -605,7 +605,7 @@ def update_think_msg(final=False):
         
         media_str = f" | 🖼️ 节省:{session_media_saved:.1f}MB" if session_media_saved > 0 else ""
         fold_str = f" | ♻️ 折叠:{session_folds}次" if session_folds > 0 else ""
-        err_str = f"🚨 异常报告: {session_error}" if session_error else ""
+        err_str = f"\n🚨 异常报告: {session_error}" if session_error else ""
         warn_str = f"\n⚠️ 长文警告: 消息可能被截断" if session_warn else ""
 
         # 组装最终报文
