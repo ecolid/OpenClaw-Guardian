@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.9"
+VERSION="v1.11.10"
 set -e
 
 # =================================================================
@@ -532,7 +532,7 @@ def send_msg(text, reply_markup=None, disable_notification=False):
             retry_after = r.json().get("parameters", {}).get("retry_after", 30)
             mark_bot_banned(api_url, retry_after)
             
-            is_startup = text.startswith("�")
+            is_startup = text.startswith("👋")
             old_idx = CURRENT_BOT_INDEX
             other_idx = 2 if CURRENT_BOT_INDEX == 1 else 1
 
@@ -1048,12 +1048,11 @@ def handle_msg(msg):
 <i>注: 字符数包含上下文负载，反映 API 消耗强度。</i>'''
         send_msg(dash)
         return
-        send_msg(dash)
-        return
 
     if text.startswith("/status"):
         send_msg("⏳ 正在采集硬件深层指标，请稍候...")
         try:
+            s = load_stats() # [v1.11.10 Fix NameError]
             # Service Status
             oc_status = run_cmd("systemctl is-active openclaw").strip().upper()
             oc_emoji = "🟢" if oc_status == "ACTIVE" else "🔴"
