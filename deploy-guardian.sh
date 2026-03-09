@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.10"
+VERSION="v1.11.11"
 set -e
 
 # =================================================================
@@ -1509,14 +1509,18 @@ def main():
     threading.Thread(target=thinking_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
     threading.Thread(target=cooldown_notifier, daemon=True).start()
-    try:
-        r = requests.get(f"{get_api_url()}/getUpdates", timeout=5).json()
-        if r.get("ok") and r["result"]:
-            # [v1.11.1] 双机轮询偏移量
-            pass # The original code to ignore old updates is replaced by the new polling logic
-    except: pass
-    
+    # [v1.11.11] 启动暴力同步：清空 Telegram 堆积的旧消息，防止重启触发旧指令循环
     offset_1, offset_2 = None, None
+    for idx, url in [(1, API_URL_1), (2, API_URL_2)]:
+        if not url: continue
+        try:
+            r = requests.get(f"{url}/getUpdates", params={"offset": -1, "timeout": 1}, timeout=5).json()
+            if r.get("ok") and r["result"]:
+                off = r["result"][-1]["update_id"] + 1
+                if idx == 1: offset_1 = off
+                else: offset_2 = off
+        except: pass
+    
     while True:
         # 轮流检查主、备机器人的更新
         for bot_idx in [1, 2]:
