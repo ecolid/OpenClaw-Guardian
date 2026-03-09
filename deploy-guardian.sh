@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.10.2"
+VERSION="v1.10.3"
 set -e
 
 # =================================================================
@@ -221,7 +221,8 @@ for PART in "\${PART_FILES[@]}"; do
             -d text="❌ [Guardian 备份失败] 卷 \${PART_INDEX} 上传失败。由于 Telegram API 报错，请检查网络或 Token。"
         exit 1
     fi
-    PART_INDEX=\$((PART_INDEX + 1))
+    PART_INDEX=$((PART_INDEX + 1))
+    sleep 2 # [Resilience 1.10.3] 防止上传过快触发 Telegram 限流
 done
 
 echo "所有分卷发送完毕！正在记录历史..." >> "$BACKUP_DIR/cron_backup.log"
@@ -334,7 +335,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.10.2"
+VERSION = "v1.10.3"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -352,6 +353,7 @@ TOOL_MAP = {
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 grep_lock = threading.Lock()
+ux_threads_active = False # [v1.10.3] 原子 UX 线程保护标志
 
 def v_tuple(v_str):
     """将版本号(如 v1.9.7)转换为可比较的元组 (1, 9, 7)"""
@@ -421,9 +423,13 @@ def save_stats(s):
     except: pass
 
 def send_msg(text, reply_markup=None, disable_notification=False):
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_notification": disable_notification}
-    if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
-    try: requests.post(f"{API_URL}/sendMessage", json=payload, timeout=10)
+    try:
+        r = requests.post(f"{API_URL}/sendMessage", json=payload, timeout=10)
+        # [v1.10.3] 429 限流自避让逻辑
+        if r.status_code == 429:
+            retry_after = r.json().get("parameters", {}).get("retry_after", 5)
+            time.sleep(retry_after)
+            return requests.post(f"{API_URL}/sendMessage", json=payload, timeout=10)
     except: pass
 
 def run_cmd(cmd, timeout_sec=None):
@@ -508,9 +514,16 @@ def update_think_msg(final=False):
         text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{tool_live}{err_live}"
     
     try:
-        resp = requests.post(f"{API_URL}/editMessageText", json={
+        r = requests.post(f"{API_URL}/editMessageText", json={
             "chat_id": CHAT_ID, "message_id": think_msg_id, "text": text, "parse_mode": "HTML"
-        }, timeout=5).json()
+        }, timeout=5)
+        # [v1.10.3] 编辑类消息 429 降级处理
+        if r.status_code == 429:
+            retry_after = min(r.json().get("parameters", {}).get("retry_after", 3), 10)
+            time.sleep(retry_after) # 冷静等待
+            return
+        
+        resp = r.json()
         if resp.get("ok"): last_shown_time = elapsed
         if final:
             think_msg_id = None
@@ -582,11 +595,19 @@ def thinking_monitor():
         while is_thinking:
             try: requests.post(f"{API_URL}/sendChatAction", json={"chat_id": CHAT_ID, "action": "typing"}, timeout=5)
             except: pass
-            time.sleep(4)
+            time.sleep(5) # [v1.10.3] 调整为 5s，减少 API 震荡
 
     def live_ticker():
         while is_thinking:
-            update_think_msg(); time.sleep(1.0)
+            update_think_msg(); time.sleep(2.0) # [v1.10.3] 调整为 2s，在高并发下保持冷静
+
+    # --- [v1.10.3] UX 线程原子启动器 ---
+    def start_ux_threads():
+        global ux_threads_active
+        if not ux_threads_active:
+            ux_threads_active = True
+            threading.Thread(target=typing_loop, daemon=True).start()
+            threading.Thread(target=live_ticker, daemon=True).start()
 
     # --- 无损续传加载逻辑 ---
     if os.path.exists(RESUME_FILE):
@@ -618,8 +639,7 @@ def thinking_monitor():
                 think_msg_id = resp["result"]["message_id"]
             
             # 重启后立刻恢复动画和输入状态
-            threading.Thread(target=typing_loop, daemon=True).start()
-            threading.Thread(target=live_ticker, daemon=True).start()
+            start_ux_threads()
         except: pass
 
     while True:
@@ -649,8 +669,7 @@ def thinking_monitor():
                             "parse_mode": "HTML", "disable_notification": True
                         }, timeout=5).json()
                         if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
-                        threading.Thread(target=typing_loop, daemon=True).start()
-                        threading.Thread(target=live_ticker, daemon=True).start()
+                        start_ux_threads()
                         break
                     elif 'new=idle' in l and 'run_completed' in l:
                         break # 最近的状态是空闲，无需恢复
@@ -677,8 +696,7 @@ def thinking_monitor():
                         "parse_mode": "HTML", "disable_notification": True
                     }, timeout=5).json()
                     if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
-                    threading.Thread(target=typing_loop, daemon=True).start()
-                    threading.Thread(target=live_ticker, daemon=True).start()
+                    start_ux_threads()
 
                 # --- 实时采集单次会话的数据 ---
                 if is_thinking:
@@ -719,6 +737,8 @@ def thinking_monitor():
                 if 'new=idle' in line_str and 'run_completed' in line_str:
                     if is_thinking:
                         is_thinking = False
+                        global ux_threads_active
+                        ux_threads_active = False # 重置 UX 状态，准备下一次会话
                         final_elapsed = time.time() - think_start_time
                         s = load_stats()
                         s["total_thinking_seconds"] = s.get("total_thinking_seconds", 0) + final_elapsed
