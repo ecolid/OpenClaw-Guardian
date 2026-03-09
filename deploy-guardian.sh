@@ -605,7 +605,7 @@ def update_think_msg(final=False):
         
         media_str = f" | 🖼️ 节省:{session_media_saved:.1f}MB" if session_media_saved > 0 else ""
         fold_str = f" | ♻️ 折叠:{session_folds}次" if session_folds > 0 else ""
-        err_str = f"\n🚨 异常报告: {session_error}" if session_error else ""
+        err_str = f"🚨 异常报告: {session_error}" if session_error else ""
         warn_str = f"\n⚠️ 长文警告: 消息可能被截断" if session_warn else ""
 
         # 组装最终报文
@@ -654,7 +654,7 @@ def update_think_msg(final=False):
             name = TOOL_MAP.get(k, k)
             tool_items.append(f"{name}:{v}次")
         tool_live = f"🛠️ {'｜'.join(tool_items)}" if tool_items else ""
-        err_live = " | 🚨 有异常" if session_error else ""
+        err_live = f"🚨 异常: {session_error}" if session_error else ""
         
         inc_str = f" ({delta:+}s)" if delta != 0 else ""
         scale_live = f"<code>{session_scale/1000:.1f}k</code>" if session_scale > 0 else "初始化..."
