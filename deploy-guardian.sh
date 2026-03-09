@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.7"
+VERSION="v1.11.8"
 set -e
 
 # =================================================================
@@ -456,15 +456,30 @@ session_warn = False
 
 def load_stats():
     today = time.strftime("%Y-%m-%d")
+    default = {
+        "total_prompt_chars": 0, "today_prompt_chars": 0, 
+        "total_convs": 0, "today_convs": 0, 
+        "total_folds": 0, "today_folds": 0, 
+        "total_thinking_seconds": 0, "last_reset_date": today,
+        "today_tools": {}, "total_tools": {},
+        "max_scale_today": 0, "max_scale_total": 0,
+        "media_saved_total": 0.0
+    }
     if os.path.exists(STATS_FILE):
         try:
             with open(STATS_FILE, "r") as f:
                 s = json.load(f)
                 if s.get("last_reset_date") != today:
-                    s.update({"today_prompt_chars": 0, "today_convs": 0, "today_folds": 0, "last_reset_date": today})
+                    s.update({
+                        "today_prompt_chars": 0, "today_convs": 0, "today_folds": 0, 
+                        "today_tools": {}, "max_scale_today": 0, "last_reset_date": today
+                    })
+                # 补全缺失字段
+                for k, v in default.items():
+                    if k not in s: s[k] = v
                 return s
         except: pass
-    return {"total_prompt_chars": 0, "today_prompt_chars": 0, "total_convs": 0, "today_convs": 0, "total_folds": 0, "today_folds": 0, "total_thinking_seconds": 0, "last_reset_date": today}
+    return default
 
 def load_schedule():
     default = {"hours": [3, 7, 11, 15, 19, 23], "label": "每 4 小时 (错峰)"}
@@ -597,6 +612,26 @@ def update_think_msg(final=False):
         warn_str = f"\n⚠️ 内容过长已截断" if session_warn else ""
         
         text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s{wait_str} {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{scale_str}{media_str}{tool_str}{fold_str}{err_str}{warn_str}"
+        
+        # [v1.11.8] 数据持久化：更新统计指标
+        s = load_stats()
+        s["total_prompt_chars"] += session_chars
+        s["today_prompt_chars"] += session_chars
+        s["total_convs"] += 1
+        s["today_convs"] += 1
+        s["total_folds"] += session_folds
+        s["today_folds"] += session_folds
+        s["total_thinking_seconds"] += elapsed
+        s["max_scale_today"] = max(s.get("max_scale_today", 0), session_scale)
+        s["max_scale_total"] = max(s.get("max_scale_total", 0), session_scale)
+        s["media_saved_total"] = s.get("media_saved_total", 0.0) + session_media_saved
+        
+        # 全量更新工具树
+        for t_name, count in session_tools.items():
+            s["today_tools"][t_name] = s["today_tools"].get(t_name, 0) + count
+            s["total_tools"][t_name] = s["total_tools"].get(t_name, 0) + count
+        save_stats(s)
+        
         if os.path.exists(RESUME_FILE): os.remove(RESUME_FILE) # 正常结束清除存档
     else:
         # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
@@ -971,21 +1006,32 @@ def handle_msg(msg):
         avg_total = s['total_prompt_chars'] / s['total_convs'] if s['total_convs'] else 0
         avg_today = s['today_prompt_chars'] / s['today_convs'] if s['today_convs'] else 0
         avg_time = s.get('total_thinking_seconds', 0) / s['total_convs'] if s['total_convs'] else 0
-        dash = f'''📊 <b>小龙虾数据看板 (Stats Center)</b>
------------------------------------
-📅 <b>今日统计 (Today)</b>
-- 对话次数: <code>{s['today_convs']}</code> 次
-- 字符规模: <code>{s['today_prompt_chars']}</code> Chars
-- 记忆折叠: <code>{s['today_folds']}</code> 次
-- 平均规模: <code>{avg_today:.1f}</code> 字/次
+        
+        def fmt_tools(tools_dict):
+            if not tools_dict: return "暂无技能调用记录"
+            sorted_t = sorted(tools_dict.items(), key=lambda x: x[1], reverse=True)
+            return " | ".join([f"<code>{TOOL_MAP.get(k, k)}</code>×{v}" for k, v in sorted_t])
 
-🌎 <b>历史累计 (Total)</b>
-- 总对话数: <code>{s['total_convs']}</code> 次
-- 总字符数: <code>{s['total_prompt_chars']}</code> Chars
-- 平均规模: <code>{avg_total:.1f}</code> 字/次
-- 平均响应: <code>{avg_time:.1f}</code> 秒
+        dash = f'''📊 <b>小龙虾情报中心 (Intelligence Center)</b>
 -----------------------------------
-<i>注: 字符数包含提示词与上下文，反映 API 消耗强度。</i>'''
+📅 <b>今日智力表现 (Today)</b>
+- 对话规模: <code>{s['today_prompt_chars']:,}</code> 字符
+- 巅峰规模: <code>{s.get('max_scale_today', 0)/1000:.1f}k</code> Chars
+- 记忆折叠: <code>{s['today_folds']}</code> 次
+- <b>今日技能树:</b>
+  {fmt_tools(s.get('today_tools', {}))}
+
+🌍 <b>历史累计进化 (Total)</b>
+- 总对话数: <code>{s['total_convs']}</code> 次
+- 巅峰负荷: <code>{s.get('max_scale_total', 0)/1000:.1f}k</code> Chars
+- 环保节省: 💡 <code>{s.get('media_saved_total', 0.0):.2f} MB</code> (流量)
+- 平均响应: <code>{avg_time:.1f}</code> 秒
+- <b>核心技能树:</b>
+  {fmt_tools(s.get('total_tools', {}))}
+-----------------------------------
+<i>注: 字符数包含上下文负载，反映 API 消耗强度。</i>'''
+        send_msg(dash)
+        return
         send_msg(dash)
         return
 
@@ -1055,24 +1101,55 @@ def handle_msg(msg):
             else:
                 status_header = f"🦞 <b>小龙虾状态</b>: 💤 空闲待命"
 
+            # [v1.11.8] 上下文拥挤度监控
+            current_scale = session_scale if is_thinking else 0
+            if not current_scale:
+                # 尝试从今日巅峰或残留状态获取估值
+                current_scale = s.get("max_scale_today", 0)
+            scale_pct = (current_scale / 1000000.0) * 100 # 以 1m 为基准
+            context_bar = gen_bar(scale_pct, length=12)
+            context_info = f"🧠 脑力负荷: {context_bar} (<code>{current_scale/1000:.1f}k/1.0m</code>)"
+
+            # [v1.11.8] 双机 RTT 与封禁进度
+            def get_rtt_info(idx):
+                token = BOT_TOKEN if idx == 1 else BOT_TOKEN_2
+                if not token: return "🔴 未配置"
+                url = f"https://api.telegram.org/bot{token}"
+                
+                # RTT 测量
+                t1 = time.time()
+                try: requests.get(f"{url}/getMe", timeout=3); rtt = int((time.time() - t1) * 1000)
+                except: rtt = -1
+                
+                # 封禁检测
+                until = BOT_BANNED_UNTIL.get(url, 0)
+                if time.time() < until:
+                    remain = int(until - time.time())
+                    pct = 100 - (remain / 86400 * 100) # 简化进度条，仅示警
+                    return f"🚫 封禁中 ({remain}s)"
+                return f"🟢 {rtt}ms" if rtt > 0 else "🔴 超时"
+
             dash = f'''📊 <b>核心引擎状态 (Guardian {VERSION})</b>
 -----------------------------------
 {status_header}
+{context_info}
 {oc_emoji} <b>OpenClaw</b> [<code>{oc_status}</code>] ({oc_time_str})
 ⏱️ <b>宿主机 Uptime</b>: <code>{uptime}</code>
-🔥 <b>负载热度</b> (1/5/15m): <code>{load}</code>
+
+<b>[网络与韧性监控]</b>
+📡 <b>Bot #1 时延</b>: <code>{get_rtt_info(1)}</code>
+📡 <b>Bot #2 时延</b>: <code>{get_rtt_info(2)}</code>
+🔄 <b>活跃链路</b>: <code>Bot #{CURRENT_BOT_INDEX}</code>
 
 <b>[硬件水位监测]</b>
 <pre>
 🧠 CPU: {gen_bar(cpu_pct)}
 🐏 内存: {gen_bar(mem_pct)} ({mem_str})
-🔄 Swap: {gen_bar(swap_pct)} ({swap_str})
 💽 磁盘: {gen_bar(disk_pct)} ({disk_str})
 🕒 <b>最近备份</b>: <code>{last_backup_str}</code>
 
 <b>[自动化调度中心]</b>
 ⏰ <b>Cron 服务</b>: {cron_status}
-📌 <b>定时任务</b>: {cron_job_status}
 ⏭️ <b>下次预定</b>: 今天 {next_backup_time}
 </pre>
 -----------------------------------'''
