@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.5"
+VERSION="v1.11.6"
 set -e
 
 # =================================================================
@@ -425,6 +425,8 @@ def switch_bot_manual(target_idx=None, reason="手动切换"):
     if ok:
         old_idx = CURRENT_BOT_INDEX
         CURRENT_BOT_INDEX = new_idx
+        # [v1.11.6] 切换后强制刷新该 Bot 菜单
+        set_commands(force_idx=new_idx)
         send_msg(f"🔄 <b>路由已切换</b>\n从 Bot #{old_idx} 切换至 Bot #{new_idx}\n原因: <code>{reason}</code>")
         return True
     else:
@@ -887,7 +889,8 @@ def cooldown_notifier():
         time.sleep(10)
 
 def ota_monitor():
-    """后台轮询 GitHub 检查更新"""
+    """后台轮询 GitHub 检查更新 (v1.11.6 增加启动静默期)"""
+    time.sleep(600) # 启动后静默 10 分钟
     notified_version = VERSION
     while True:
         try:
@@ -925,7 +928,8 @@ def ota_monitor():
         time.sleep(600)
 
 # --- 指令处理 ---
-def set_commands():
+def set_commands(force_idx=None):
+    """设置机器人指令菜单 (v1.11.6 支持双机同步刷新)"""
     commands = [
         # 🔍 状态与监控 (Metrics)
         {"command": "status", "description": "📊 系统核心状态 (硬件/备份/下次预定)"},
@@ -944,7 +948,17 @@ def set_commands():
         {"command": "update", "description": "📥 从 GitHub 获取并更新守护程序 (OTA)"},
         {"command": "update_rollback", "description": "💊 守护程序后悔药 (恢复上一版本大脑)"}
     ]
-    try: requests.post(f"{get_api_url()}/setMyCommands", json={"commands": commands}, timeout=5)
+    try:
+        # [v1.11.6] 允许强制刷新特定 Bot，或根据自检同步
+        target_urls = []
+        if force_idx == 1: target_urls = [API_URL_1]
+        elif force_idx == 2: target_urls = [API_URL_2]
+        else:
+            target_urls = [API_URL_1]
+            if API_URL_2: target_urls.append(API_URL_2)
+            
+        for url in target_urls:
+            requests.post(f"{url}/setMyCommands", json={"commands": commands}, timeout=5)
     except: pass
 
 def handle_msg(msg):
