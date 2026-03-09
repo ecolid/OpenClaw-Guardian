@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.10.3"
+VERSION="v1.11.0"
 set -e
 
 # =================================================================
@@ -43,15 +43,20 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 if [ -z "$TG_BOT_TOKEN" ]; then
-    # 要求用户输入 Telegram Bot Token
+    # 要求用户输入 Telegram 主 Bot Token
     while true; do
-        read -p "请输入你的 Telegram Bot Token (例如 123456789:ABCdefGHI...): " TG_BOT_TOKEN
+        read -p "请输入你的 Telegram 主 Bot Token (例如 123456789:ABC...): " TG_BOT_TOKEN
         if [[ "$TG_BOT_TOKEN" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
             break
         else
             log_warn "Token 格式似乎有误，请重新输入。"
         fi
     done
+fi
+
+if [ -z "$TG_BOT_TOKEN_2" ]; then
+    # 要求用户输入备用 Bot Token (新增 v1.11.0)
+    read -p "请输入备用 Bot Token (可选，按回车跳过): " TG_BOT_TOKEN_2
 fi
 
 if [ -z "$TG_CHAT_ID" ]; then
@@ -68,6 +73,7 @@ fi
 
 mkdir -p /root/.openclaw-guardian
 echo "TG_BOT_TOKEN=\"$TG_BOT_TOKEN\"" > "$ENV_FILE"
+echo "TG_BOT_TOKEN_2=\"$TG_BOT_TOKEN_2\"" >> "$ENV_FILE"
 echo "TG_CHAT_ID=\"$TG_CHAT_ID\"" >> "$ENV_FILE"
 
 log_info "配置完成，准备开始安装环境..."
@@ -333,13 +339,15 @@ cat > "$BACKUP_DIR/guardian-bot.py" <<EOF
 import requests, time, subprocess, json, os, threading, html, re
 
 BOT_TOKEN = "${TG_BOT_TOKEN}"
+BOT_TOKEN_2 = "${TG_BOT_TOKEN_2}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.10.3"
+VERSION = "v1.11.0"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
+CURRENT_BOT = 1 # [v1.11.0] 1: 主 Bot, 2: 备用 Bot
 
 TOOL_MAP = {
     "web_search": "搜索", 
@@ -351,9 +359,28 @@ TOOL_MAP = {
     "read_url_content": "阅卷"
 }
 
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+API_URL_1 = f"https://api.telegram.org/bot{BOT_TOKEN}"
+API_URL_2 = f"https://api.telegram.org/bot{BOT_TOKEN_2}" if BOT_TOKEN_2 else None
 grep_lock = threading.Lock()
-ux_threads_active = False # [v1.10.3] 原子 UX 线程保护标志
+ux_threads_active = False 
+bot_lock = threading.Lock() # [v1.11.0] 保护 CURRENT_BOT 切换
+
+def get_api_url():
+    global CURRENT_BOT
+    if CURRENT_BOT == 2 and API_URL_2: return API_URL_2
+    return API_URL_1
+
+def switch_bot():
+    """触发机器人秒级切换"""
+    global CURRENT_BOT
+    with bot_lock:
+        if CURRENT_BOT == 1 and API_URL_2:
+            CURRENT_BOT = 2
+            return True
+        elif CURRENT_BOT == 2:
+            CURRENT_BOT = 1
+            return True
+    return False
 
 def v_tuple(v_str):
     """将版本号(如 v1.9.7)转换为可比较的元组 (1, 9, 7)"""
@@ -423,13 +450,28 @@ def save_stats(s):
     except: pass
 
 def send_msg(text, reply_markup=None, disable_notification=False):
+    # [v1.11.0] 消息合规性检查：截断 4096 字符
+    if len(text) > 4000: text = text[:4000] + "\n...(内容过长已截断)..."
+    
+    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_notification": disable_notification}
+    if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
+    
     try:
-        r = requests.post(f"{API_URL}/sendMessage", json=payload, timeout=10)
-        # [v1.10.3] 429 限流自避让逻辑
+        url = f"{get_api_url()}/sendMessage"
+        r = requests.post(url, json=payload, timeout=10)
+        
+        # [v1.11.0] 429 熔断切换逻辑
         if r.status_code == 429:
             retry_after = r.json().get("parameters", {}).get("retry_after", 5)
-            time.sleep(retry_after)
-            return requests.post(f"{API_URL}/sendMessage", json=payload, timeout=10)
+            if switch_bot():
+                # 使用备用机器人重发通知
+                new_url = f"{get_api_url()}/sendMessage"
+                warn_text = f"🚨 <b>核心警报：主机器人已触发限流！</b>\n当前避让时长: <code>{retry_after}s</code>\n备用卫士已接管通讯，监控不受影响。"
+                requests.post(new_url, json={"chat_id": CHAT_ID, "text": warn_text, "parse_mode": "HTML"}, timeout=5)
+                return requests.post(new_url, json=payload, timeout=10)
+            else:
+                time.sleep(retry_after)
+                return requests.post(url, json=payload, timeout=10)
     except: pass
 
 def run_cmd(cmd, timeout_sec=None):
@@ -514,14 +556,20 @@ def update_think_msg(final=False):
         text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{tool_live}{err_live}"
     
     try:
-        r = requests.post(f"{API_URL}/editMessageText", json={
+        url = f"{get_api_url()}/editMessageText"
+        r = requests.post(url, json={
             "chat_id": CHAT_ID, "message_id": think_msg_id, "text": text, "parse_mode": "HTML"
         }, timeout=5)
-        # [v1.10.3] 编辑类消息 429 降级处理
+        
+        # [v1.11.0] 编辑类 429 同样支持切流，但由于 message_id 不跨 Bot，回退为发送新消息
         if r.status_code == 429:
-            retry_after = min(r.json().get("parameters", {}).get("retry_after", 3), 10)
-            time.sleep(retry_after) # 冷静等待
-            return
+            if switch_bot():
+                send_msg(f"🔄 <b>回执链路切换</b>: 编辑频率受限，已切换 Bot 重新同步置底回执。\n{text}")
+                return
+            else:
+                retry_after = min(r.json().get("parameters", {}).get("retry_after", 3), 10)
+                time.sleep(retry_after)
+                return
         
         resp = r.json()
         if resp.get("ok"): last_shown_time = elapsed
@@ -593,7 +641,7 @@ def thinking_monitor():
     # [Fix v1.9.9] 将辅助线程定义移至顶层，防止续传逻辑中出现 NameError
     def typing_loop():
         while is_thinking:
-            try: requests.post(f"{API_URL}/sendChatAction", json={"chat_id": CHAT_ID, "action": "typing"}, timeout=5)
+            try: requests.post(f"{get_api_url()}/sendChatAction", json={"chat_id": CHAT_ID, "action": "typing"}, timeout=5)
             except: pass
             time.sleep(5) # [v1.10.3] 调整为 5s，减少 API 震荡
 
@@ -629,7 +677,7 @@ def thinking_monitor():
             os.remove(RESUME_FILE) # 仅恢复一次
             
             # [Fix v1.9.8] 视觉强化：发送崭新消息置于对话底端，取代旧消息 ID
-            resp = requests.post(f"{API_URL}/sendMessage", json={
+            resp = requests.post(f"{get_api_url()}/sendMessage", json={
                 "chat_id": CHAT_ID, 
                 "text": "🔄 <b>无感重启完成</b>: 已成功找回进度，并尝试置底恢复...", 
                 "parse_mode": "HTML", "disable_notification": True
@@ -664,7 +712,7 @@ def thinking_monitor():
                         session_wait_ms = 0
                         session_warn = False
                         # 补发一条计时核心，标记为“恢复检测”
-                        resp = requests.post(f"{API_URL}/sendMessage", json={
+                        resp = requests.post(f"{get_api_url()}/sendMessage", json={
                             "chat_id": CHAT_ID, "text": "🦞 <b>检测到小龙虾正在思考中... (启动恢复)</b>\n⏱️ 已耗时: <code>计算中...</code>",
                             "parse_mode": "HTML", "disable_notification": True
                         }, timeout=5).json()
@@ -691,7 +739,7 @@ def thinking_monitor():
                     session_media_saved = 0.0
                     session_wait_ms = 0
                     session_warn = False
-                    resp = requests.post(f"{API_URL}/sendMessage", json={
+                    resp = requests.post(f"{get_api_url()}/sendMessage", json={
                         "chat_id": CHAT_ID, "text": "🦞 <b>小龙虾正在思考中...</b>\n⏱️ 已耗时: <code>0s</code>",
                         "parse_mode": "HTML", "disable_notification": True
                     }, timeout=5).json()
@@ -819,7 +867,7 @@ def set_commands():
         {"command": "update", "description": "📥 从 GitHub 获取并更新守护程序 (OTA)"},
         {"command": "update_rollback", "description": "💊 守护程序后悔药 (恢复上一版本大脑)"}
     ]
-    try: requests.post(f"{API_URL}/setMyCommands", json={"commands": commands}, timeout=5)
+    try: requests.post(f"{get_api_url()}/setMyCommands", json={"commands": commands}, timeout=5)
     except: pass
 
 def handle_msg(msg):
@@ -1068,7 +1116,7 @@ def handle_msg(msg):
 def handle_callback(cb):
     data = cb["data"]
     if str(cb["message"]["chat"]["id"]) != CHAT_ID: return
-    try: requests.post(f"{API_URL}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
+    try: requests.post(f"{get_api_url()}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
     except: pass
     
     if data == "log_oc":
@@ -1104,7 +1152,7 @@ def handle_callback(cb):
         # [Fix v1.9.8] 状态冻结反馈：告诉用户数据已存，不再沉默
         if is_thinking and think_msg_id:
             try:
-                requests.post(f"{API_URL}/editMessageText", json={
+                requests.post(f"{get_api_url()}/editMessageText", json={
                     "chat_id": CHAT_ID, "message_id": think_msg_id,
                     "text": "📦 <b>当前思考状态已安全固化</b>\n系统正在进行热更新，新版上线后将自动在此置底接管进度...",
                     "parse_mode": "HTML"
@@ -1220,7 +1268,7 @@ fi
             try:
                 with open(local_merged_file, "wb") as f_out:
                     for idx, fid in enumerate(file_ids):
-                        finfo = requests.post(f"{API_URL}/getFile", json={"file_id": fid}).json()
+                        finfo = requests.post(f"{get_api_url()}/getFile", json={"file_id": fid}).json()
                         if not finfo.get("ok"):
                             send_msg(f"❌ 获取第 {idx+1} 个卷失败，中止回滚。")
                             os.remove(local_merged_file)
@@ -1242,16 +1290,16 @@ def main():
     threading.Thread(target=thinking_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
     try:
-        r = requests.get(f"{API_URL}/getUpdates", timeout=5).json()
+        r = requests.get(f"{get_api_url()}/getUpdates", timeout=5).json()
         if r.get("ok") and r["result"]:
             ignored = r["result"][-1]["update_id"] + 1
-            requests.get(f"{API_URL}/getUpdates", params={"offset": ignored, "timeout": 1})
+            requests.get(f"{get_api_url()}/getUpdates", params={"offset": ignored, "timeout": 1})
     except: pass
     
     offset = None
     while True:
         try:
-            r = requests.get(f"{API_URL}/getUpdates", params={"offset": offset, "timeout": 30}, timeout=35).json()
+            r = requests.get(f"{get_api_url()}/getUpdates", params={"offset": offset, "timeout": 30}, timeout=35).json()
             if r.get("ok"):
                 for upd in r["result"]:
                     offset = upd["update_id"] + 1
