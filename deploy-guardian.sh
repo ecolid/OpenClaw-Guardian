@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.4"
+VERSION="v1.11.5"
 set -e
 
 # =================================================================
@@ -364,7 +364,8 @@ SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
 HISTORY_FILE = os.path.join(BACKUP_DIR, "backup-history.json")
-CURRENT_BOT = 1 # [v1.11.0] 1: 主 Bot, 2: 备用 Bot
+CURRENT_BOT_INDEX = 1 # [v1.11.5] 粘性路由索引
+BOT_BANNED_UNTIL = {} # {api_url: timestamp}
 
 TOOL_MAP = {
     "web_search": "搜索", 
@@ -381,45 +382,54 @@ API_URL_2 = f"https://api.telegram.org/bot{BOT_TOKEN_2}" if BOT_TOKEN_2 else Non
 grep_lock = threading.Lock()
 ux_threads_active = False 
 
-# [v1.11.3] 智能熔断定时器
-bot1_banned_until = 0.0
-bot2_banned_until = 0.0
+# [v1.11.5] 智能熔断定时器
 bot_lock = threading.Lock() 
 
-def get_api_url(force_prefer=None):
-    """
-    [v1.11.3] 智能路由算法：精准避让“小黑屋”
-    1. 优先采用 Bot 1 (主机)
-    2. 如果 Bot 1 正在封禁期内，自动跳过走 Bot 2 (副机)
-    3. 如果 Bot 2 也正在封禁，返回主/副中较早解封的一个进行硬试
-    """
-    global bot1_banned_until, bot2_banned_until
-    now = time.time()
-    
-    with bot_lock:
-        if force_prefer == 1: return API_URL_1
-        if force_prefer == 2 and API_URL_2: return API_URL_2
-        
-        # 判定 Bot 1 是否可用
-        bot1_ready = now >= bot1_banned_until
-        # 判定 Bot 2 是否可用
-        bot2_ready = (API_URL_2 is not None) and (now >= bot2_banned_until)
-        
-        if bot1_ready: return API_URL_1
-        if bot2_ready: return API_URL_2
-        
-        # 如果都在封禁：挑个早点出来的
-        if API_URL_2 and bot2_banned_until < bot1_banned_until:
-            return API_URL_2
-        return API_URL_1
+def test_bot_health(idx):
+    """测试指定序号机器人的健康度 (返回: (是否可用, 报错原因))"""
+    token = BOT_TOKEN if idx == 1 else BOT_TOKEN_2
+    if not token: return False, "未配置 Token"
+    url = f"https://api.telegram.org/bot{token}"
+    try:
+        r = requests.get(f"{url}/getMe", timeout=5)
+        if r.status_code == 200:
+            return True, None
+        elif r.status_code == 429:
+            retry_after = r.json().get("parameters", {}).get("retry_after", 30)
+            mark_bot_banned(url, retry_after)
+            return False, f"429 限流 (剩 {retry_after}s)"
+        else:
+            return False, f"API 报错: {r.status_code}"
+    except Exception as e:
+        return False, f"连接失败: {str(e)}"
 
-def mark_bot_banned(api_url, retry_after):
-    """记录特定 Bot 的入狱时间"""
-    global bot1_banned_until, bot2_banned_until
+def get_api_url():
+    """获取当前粘性路由指向的 API URL"""
+    token = BOT_TOKEN if CURRENT_BOT_INDEX == 1 else BOT_TOKEN_2
+    return f"https://api.telegram.org/bot{token}"
+
+def mark_bot_banned(url, retry_after):
     with bot_lock:
-        target_ts = time.time() + retry_after
-        if api_url == API_URL_1: bot1_banned_until = target_ts
-        elif api_url == API_URL_2: bot2_banned_until = target_ts
+        BOT_BANNED_UNTIL[url] = time.time() + retry_after
+    
+def is_bot_banned(url):
+    until = BOT_BANNED_UNTIL.get(url, 0)
+    return time.time() < until
+
+def switch_bot_manual(target_idx=None, reason="手动切换"):
+    """安全切换机器人逻辑"""
+    global CURRENT_BOT_INDEX
+    new_idx = target_idx if target_idx else (2 if CURRENT_BOT_INDEX == 1 else 1)
+    
+    ok, err = test_bot_health(new_idx)
+    if ok:
+        old_idx = CURRENT_BOT_INDEX
+        CURRENT_BOT_INDEX = new_idx
+        send_msg(f"🔄 <b>路由已切换</b>\n从 Bot #{old_idx} 切换至 Bot #{new_idx}\n原因: <code>{reason}</code>")
+        return True
+    else:
+        send_msg(f"⚠️ <b>切换失败</b>\n目标 Bot #{new_idx} 目前不可用: <code>{err}</code>")
+        return False
 
 def v_tuple(v_str):
     """将版本号(如 v1.9.7)转换为可比较的元组 (1, 9, 7)"""
@@ -489,29 +499,36 @@ def save_stats(s):
     except: pass
 
 def send_msg(text, reply_markup=None, disable_notification=False):
-    # [v1.11.0] 消息合规性检查
+    """发送消息: 粘性路由保证体验一致性 (v1.11.5)"""
+    global CURRENT_BOT_INDEX
     if len(text) > 4000: text = text[:4000] + "\n...(内容过长已截断)..."
     
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML", "disable_notification": disable_notification}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     
-    # [v1.11.3] 智能链条式发送
-    attempt_urls = [get_api_url()] # 获取最优路径
-    if API_URL_2 and attempt_urls[0] == API_URL_1: attempt_urls.append(API_URL_2)
-    elif attempt_urls[0] == API_URL_2: attempt_urls.append(API_URL_1)
-
-    for url in attempt_urls:
-        try:
-            r = requests.post(f"{url}/sendMessage", json=payload, timeout=10)
-            if r.status_code == 429:
-                retry_after = r.json().get("parameters", {}).get("retry_after", 5)
-                mark_bot_banned(url, retry_after)
-                continue # 主机封了，立即试下一个
-            if r.status_code == 200: return r # 成功
-        except: continue
-    
-    # 如果全军覆没，最后挣扎一下
-    time.sleep(2); return None
+    api_url = get_api_url()
+    try:
+        r = requests.post(f"{api_url}/sendMessage", json=payload, timeout=10)
+        # 粘性降级：仅在当前 Bot 彻底出事时，且备份可用，才执行跳过
+        if r.status_code == 429:
+            retry_after = r.json().get("parameters", {}).get("retry_after", 30)
+            mark_bot_banned(api_url, retry_after)
+            
+            # 只有在另一个 Bot 健康时才自动切流，否则保持现状报报错
+            other_idx = 2 if CURRENT_BOT_INDEX == 1 else 1
+            if test_bot_health(other_idx)[0]:
+                old_idx = CURRENT_BOT_INDEX
+                CURRENT_BOT_INDEX = other_idx
+                # 在新通道补发一条切流通知
+                new_url = f"{get_api_url()}/sendMessage"
+                requests.post(new_url, json={
+                    "chat_id": CHAT_ID, 
+                    "text": f"🚨 <b>链路自动备灾</b>: Bot #{old_idx} 被限流 {retry_after}s，已切至 Bot #{CURRENT_BOT_INDEX}。\n\n历史消息: {text}",
+                    "parse_mode": "HTML"
+                }, timeout=10)
+            return
+        return r
+    except: return None
 
 def run_cmd(cmd, timeout_sec=None):
     try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=timeout_sec)
@@ -601,10 +618,11 @@ def update_think_msg(final=False):
             "chat_id": CHAT_ID, "message_id": think_msg_id, "text": text, "parse_mode": "HTML"
         }, timeout=5)
         
-        # [v1.11.0] 编辑类 429 同样支持切流，但由于 message_id 不跨 Bot，回退为发送新消息
+        # [v1.11.5] 粘性逻辑：编辑受限时，仅在备份健康时提醒
         if r.status_code == 429:
-            if switch_bot():
-                send_msg(f"🔄 <b>回执链路切换</b>: 编辑频率受限，已切换 Bot 重新同步置底回执。\n{text}")
+            other_idx = 2 if CURRENT_BOT_INDEX == 1 else 1
+            if test_bot_health(other_idx)[0]:
+                switch_bot_manual(other_idx, "编辑频率受限")
                 return
             else:
                 retry_after = min(r.json().get("parameters", {}).get("retry_after", 3), 10)
@@ -851,6 +869,23 @@ def thinking_monitor():
         except: pass
         time.sleep(5)
 
+def cooldown_notifier():
+    """后台监控：当静默期结束时提醒用户可以切回"""
+    notified_banned_urls = set()
+    while True:
+        now = time.time()
+        for url, until in list(BOT_BANNED_UNTIL.items()):
+            if now >= until and url in notified_banned_urls:
+                # 冷却结束，通知用户
+                idx = 1 if url == API_URL_1 else 2
+                if idx != CURRENT_BOT_INDEX:
+                    btn = [[{"text": f"🔄 立即切回 Bot #{idx}", "callback_data": f"switch_to:{idx}"}]]
+                    send_msg(f"✅ <b>Bot #{idx} 冷却结束</b>\n该机器人目前已恢复健康，是否需要切换回该线路？", {"inline_keyboard": btn})
+                notified_banned_urls.remove(url)
+            elif now < until:
+                notified_banned_urls.add(url)
+        time.sleep(10)
+
 def ota_monitor():
     """后台轮询 GitHub 检查更新"""
     notified_version = VERSION
@@ -903,6 +938,7 @@ def set_commands():
         {"command": "rollback", "description": "⏪ 恢复历史快照 (带二次确认)"},
         
         # ⚙️ 系统维护 (Control)
+        {"command": "switch", "description": "🤖 双机分流：手动切换主/备机器人线路"},
         {"command": "restart", "description": "🔄 重启后端服务 (清理内存/更新配置)"},
         {"command": "schedule", "description": "⏰ 计划调度：调整自动备份频率"},
         {"command": "update", "description": "📥 从 GitHub 获取并更新守护程序 (OTA)"},
@@ -1143,6 +1179,15 @@ def handle_msg(msg):
             size_str = v.get('size', '未知大小')
             buttons.append([{"text": f"🕒 {v['time']} | 📦 {size_str}", "callback_data": f"rb_{v.get('msg_id', i)}"}])
         send_msg("请选择要回滚的时间点：\n<i>⚠️ 警告：这将覆盖当前所有配置和记忆！</i>", {"inline_keyboard": buttons})
+    elif text.startswith("/switch"):
+        other_idx = 2 if CURRENT_BOT_INDEX == 1 else 1
+        btn = [
+            [{"text": f"🔄 切换到 Bot #{other_idx}", "callback_data": f"switch_to:{other_idx}"}],
+            [{"text": "❌ 保持现状", "callback_data": "cancel"}]
+        ]
+        ok, err = test_bot_health(other_idx)
+        health_str = "🟢 经检查：目标 Bot 状态健康" if ok else f"🔴 警报：目标 Bot 目前不可用 ({err})"
+        send_msg(f"🤖 <b>双机线路管理中心</b>\n当前正在使用: <b>Bot #{CURRENT_BOT_INDEX}</b>\n\n{health_str}\n\n您是否要手动切换线路？", {"inline_keyboard": btn})
     elif text.startswith("/schedule"):
         s = load_schedule()
         buttons = [
@@ -1159,6 +1204,11 @@ def handle_callback(cb):
     if str(cb["message"]["chat"]["id"]) != CHAT_ID: return
     try: requests.post(f"{get_api_url()}/answerCallbackQuery", json={"callback_query_id": cb["id"]})
     except: pass
+    
+    if data.startswith("switch_to:"):
+        target_idx = int(data.split(":")[1])
+        switch_bot_manual(target_idx, "用户手动触发")
+        return
     
     if data == "log_oc":
         logs = run_cmd("journalctl -u openclaw -n 20 --no-pager | awk '{print substr(\$0, 1, 500)}'")[-3500:]
@@ -1325,11 +1375,27 @@ fi
 
 def main():
     set_commands()
+    
+    # [v1.11.5] 启动自检与粘性初始化
+    global CURRENT_BOT_INDEX
+    ok1, err1 = test_bot_health(1)
+    if not ok1:
+        ok2, err2 = test_bot_health(2)
+        if ok2:
+            CURRENT_BOT_INDEX = 2
+            log_prefix = f"⚠️ Bot #1 不可用 ({err1})，已自动降级至 Bot #2。"
+        else:
+            log_prefix = f"🚨 极其危急：双机均不可用！\n#1: {err1}\n#2: {err2}"
+    else:
+        log_prefix = "✅ 链路自检通过 (Bot #1 优先模式)"
+
     label, next_time = get_backup_info()
-    send_msg(f"👋 <b>Guardian 守护进程 ({VERSION}) 已启动！</b>\n📅 当前计划: <code>{label}</code>\n⏭️ 下次执行: <code>今天 {next_time}</code>\n\n随时可以使用 /status 查看详细水位。")
+    send_msg(f"👋 <b>Guardian ({VERSION}) 巡航启动</b>\n{log_prefix}\n\n📅 备份计划: <code>{label}</code>\n⏭️ 下次执行: <code>今天 {next_time}</code>")
+    
     threading.Thread(target=health_monitor, daemon=True).start()
     threading.Thread(target=thinking_monitor, daemon=True).start()
     threading.Thread(target=ota_monitor, daemon=True).start()
+    threading.Thread(target=cooldown_notifier, daemon=True).start()
     try:
         r = requests.get(f"{get_api_url()}/getUpdates", timeout=5).json()
         if r.get("ok") and r["result"]:
