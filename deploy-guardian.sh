@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.3"
+VERSION="v1.11.4"
 set -e
 
 # =================================================================
@@ -592,7 +592,8 @@ def update_think_msg(final=False):
         err_live = " | 🚨 有异常" if session_error else ""
         
         inc_str = f" (+{delta}s)" if delta > 0 else ""
-        text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{tool_live}{err_live}"
+        scale_live = f" | 📊 规模: <code>{session_scale/1000:.1f}k</code>" if session_scale > 0 else ""
+        text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{scale_live}{tool_live}{err_live}"
     
     try:
         url = f"{get_api_url()}/editMessageText"
@@ -785,13 +786,14 @@ def thinking_monitor():
                     if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
                     start_ux_threads()
 
-                # --- 实时采集单次会话的数据 ---
                 if is_thinking:
                     # 匹配消耗与规模 (使用 finditer 捕捉单行内的多个指标)
                     for m in re.finditer(r'(promptChars|completionChars|historyTextChars)=(\d+)', line_str):
                         k, v = m.group(1), int(m.group(2))
-                        if k == 'historyTextChars': session_scale = v
-                        else: session_chars += v
+                        if k == 'historyTextChars': 
+                            session_scale = v
+                        else: 
+                            session_chars += v
                     
                     # 匹配工具调用：动态捕捉所有 tool=xxx 字段
                     tool_match = re.search(r'embedded run tool start:.*tool=([a-z_0-9]+)', line_str)
