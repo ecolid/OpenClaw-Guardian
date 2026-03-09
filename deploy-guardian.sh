@@ -594,14 +594,14 @@ def update_think_msg(final=False):
         diff = elapsed - avg
         # 整理辅助信息
         wait_str = f" | ⏳ 延迟:{session_wait_ms}ms" if session_wait_ms > 0 else ""
-        diff_info = f"({diff:+}s)" if diff != 0 else ""
+        diff_info = f"({diff:+.1f}s)" if diff != 0 else ""
         perf_icon = "📈" if diff < 0 else "📉"
         
         tool_items = []
         for k, v in session_tools.items():
             name = TOOL_MAP.get(k, k)
             tool_items.append(f"{name}:{v}次")
-        tool_final = f"🛠️ 使用工具：{'｜'.join(tool_items)}" if tool_items else ""
+        tool_final = f"🛠️ 使用工具: {'｜'.join(tool_items)}" if tool_items else ""
         
         media_str = f" | 🖼️ 节省:{session_media_saved:.1f}MB" if session_media_saved > 0 else ""
         fold_str = f" | ♻️ 折叠:{session_folds}次" if session_folds > 0 else ""
