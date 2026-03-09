@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.10.1"
+VERSION="v1.10.2"
 set -e
 
 # =================================================================
@@ -334,7 +334,7 @@ import requests, time, subprocess, json, os, threading, html, re
 BOT_TOKEN = "${TG_BOT_TOKEN}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.10.1"
+VERSION = "v1.10.2"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -678,9 +678,6 @@ def thinking_monitor():
                     }, timeout=5).json()
                     if resp.get("ok"): think_msg_id = resp["result"]["message_id"]
                     threading.Thread(target=typing_loop, daemon=True).start()
-                    def live_ticker():
-                        while is_thinking:
-                            update_think_msg(); time.sleep(1.0)
                     threading.Thread(target=live_ticker, daemon=True).start()
 
                 # --- 实时采集单次会话的数据 ---
@@ -738,7 +735,7 @@ def thinking_monitor():
                     except: pass
                 if 'compactionSummary:' in line_str:
                     try:
-                        fc = int(re.search(r'compactionSummary:(\\d+)', line_str).group(1))
+                        fc = int(re.search(r'compactionSummary:(\d+)', line_str).group(1))
                         s = load_stats(); s['total_folds'] += fc; s['today_folds'] += fc
                         save_stats(s)
                     except: pass
@@ -1073,6 +1070,7 @@ def handle_callback(cb):
             t = int(time.time())
             r = requests.get(f"https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh?t={t}", timeout=5)
             if r.status_code == 200:
+                cv_match = re.search(r'VERSION = "(.*?)"', r.text)
                 if cv_match:
                     remote_v_str = cv_match.group(1)
                     if v_tuple(remote_v_str) > v_tuple(VERSION):
