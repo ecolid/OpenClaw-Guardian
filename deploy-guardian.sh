@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.12"
+VERSION="v1.11.13"
 set -e
 
 # =================================================================
@@ -653,10 +653,19 @@ def update_think_msg(final=False):
         tool_live = f" | 🛠️ {' '.join(tool_items)}" if tool_items else ""
         err_live = " | 🚨 有异常" if session_error else ""
         
-        inc_str = f" (+{delta}s)" if delta > 0 else ""
-        scale_live = f" | 📊 规模: <code>{session_scale/1000:.1f}k</code>" if session_scale > 0 else ""
-        chars_live = f" | 🎟️ 消耗: <code>{session_chars:,}</code>" if session_chars > 0 else ""
-        text = f"Lobster 正在思考中... {icon}\n⏱️ 已耗时: <code>{elapsed}</code> 秒{inc_str}{scale_live}{chars_live}{tool_live}{err_live}"
+        inc_str = f" ({delta:+}s)" if delta != 0 else ""
+        scale_live = f"<code>{session_scale/1000:.1f}k</code>" if session_scale > 0 else "初始化..."
+        chars_live = f"<code>{session_chars:,}</code>" if session_chars > 0 else "计算中..."
+        
+        text = f'''<b>Lobster 正在思考中... {icon}</b>
+-----------------------------------
+⏱️ 累计耗时: <code>{elapsed}</code>s {inc_str}
+📈 脑力负荷: {scale_live} 字符
+🎟️ 本次消耗: {chars_live} 字符
+{tool_live}
+{err_live}
+-----------------------------------
+<i>系统正在实时追踪 AI 思维链条...</i>'''
     
     try:
         url = f"{get_api_url()}/editMessageText"
@@ -1033,14 +1042,14 @@ def handle_msg(msg):
 -----------------------------------
 📅 <b>今日智力表现 (Today)</b>
 - 对话规模: <code>{s['today_prompt_chars']:,}</code> 字符
-- 巅峰规模: <code>{s.get('max_scale_today', 0)/1000:.1f}k</code> Chars
+- 巅峰规模: <code>{s.get('max_scale_today', 0)/1000:.1f}k</code> 字符
 - 记忆折叠: <code>{s['today_folds']}</code> 次
 - <b>今日技能树:</b>
   {fmt_tools(s.get('today_tools', {}))}
 
 🌍 <b>历史累计进化 (Total)</b>
 - 总对话数: <code>{s['total_convs']}</code> 次
-- 巅峰负荷: <code>{s.get('max_scale_total', 0)/1000:.1f}k</code> Chars
+- 巅峰负荷: <code>{s.get('max_scale_total', 0)/1000:.1f}k</code> 字符
 - 环保节省: 💡 <code>{s.get('media_saved_total', 0.0):.2f} MB</code> (流量)
 - 平均响应: <code>{avg_time:.1f}</code> 秒
 - <b>核心技能树:</b>
@@ -1331,19 +1340,15 @@ def handle_callback(cb):
 
     if data.startswith("ota_direct:"):
         remote_v = data.split(":")[1]
-        try:
-            # [Fix v1.10.0] 确认环节同样加入缓存穿透
-            t = int(time.time())
-            r = requests.get(f"https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh?t={t}", timeout=5)
-            if r.status_code == 200:
-                cv_match = re.search(r'VERSION = "(.*?)"', r.text)
-                if cv_match:
-                    remote_v_str = cv_match.group(1)
-                    if v_tuple(remote_v_str) > v_tuple(VERSION):
-                        handle_callback({"data": "ota_confirm", "id": cb["id"], "message": cb["message"]})
-                        return
-        except: pass
-        handle_msg({"text": "/update", "chat": {"id": CHAT_ID}})
+        btn = [
+            [{"text": "✅ 确定执行系统升级", "callback_data": f"ota_go:{remote_v}"}],
+            [{"text": "❌ 取消操作", "callback_data": "ota_cancel"}]
+        ]
+        send_msg(f"⚠️ <b>交互确认：执行热更新？</b>\n最新版本: <code>{remote_v}</code>\n\n系统将自动存档当前会话并在重启后无痛接管进度。", {"inline_keyboard": btn})
+        return
+
+    if data == "ota_cancel":
+        send_msg("✅ 升级操作已取消。")
         return
 
     def perform_ota():
@@ -1382,7 +1387,7 @@ fi
         with open(f"{BACKUP_DIR}/do_update.sh", "w") as f: f.write(update_script)
         os.system(f"nohup bash {BACKUP_DIR}/do_update.sh >/dev/null 2>&1 &")
 
-    if data == "ota_confirm" or data.startswith("ota_direct:"):
+    if data == "ota_confirm" or data.startswith("ota_go:"):
         perform_ota()
         return
         
