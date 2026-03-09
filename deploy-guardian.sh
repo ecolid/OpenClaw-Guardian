@@ -359,7 +359,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 BOT_TOKEN_2 = "${TG_BOT_TOKEN_2}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.11.3"
+VERSION = "${VERSION}"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -1102,7 +1102,7 @@ def handle_msg(msg):
                 if r.status_code == 200:
                     remote_v = "未知"
                     for line in r.text.split('\n'):
-                        if line.startswith('VERSION = "'):
+                        if line.startswith('VERSION="') or line.startswith('VERSION = "'):
                             remote_v = line.split('"')[1]; break
                     
                     cl_r = requests.get("https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md", timeout=10)
