@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.8"
+VERSION="v1.11.9"
 set -e
 
 # =================================================================
@@ -633,6 +633,14 @@ def update_think_msg(final=False):
         save_stats(s)
         
         if os.path.exists(RESUME_FILE): os.remove(RESUME_FILE) # 正常结束清除存档
+        
+        # [v1.11.9] 升级自检清除：如果当前版本已对齐最新通知版本，清除通知记录
+        nv_file = os.path.join(BACKUP_DIR, "notified_version.txt")
+        if os.path.exists(nv_file):
+            try:
+                with open(nv_file, "r") as f:
+                    if f.read().strip() == VERSION: os.remove(nv_file)
+            except: pass
     else:
         # 🌑🌒🌓🌔🌕🌖🌗🌘 盈亏序列
         moons = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘']
@@ -924,22 +932,30 @@ def cooldown_notifier():
         time.sleep(10)
 
 def ota_monitor():
-    """后台轮询 GitHub 检查更新 (v1.11.6 增加启动静默期)"""
-    time.sleep(600) # 启动后静默 10 分钟
-    notified_version = VERSION
+    """后台轮询 GitHub 检查更新 (v1.11.9 增加通知状态持久化)"""
+    time.sleep(300) # 启动后静默 5 分钟
+    
+    nv_file = os.path.join(BACKUP_DIR, "notified_version.txt")
+    def get_last_notified():
+        if os.path.exists(nv_file):
+            try:
+                with open(nv_file, "r") as f: return f.read().strip()
+            except: pass
+        return VERSION
+
+    notified_version = get_last_notified()
+    
     while True:
         try:
-            # [Fix v1.10.0] 引入随机时间戳对消 CDN 缓存，确保永远检查到最新版
             t = int(time.time())
             r = requests.get(f"https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-guardian.sh?t={t}", timeout=15)
             if r.status_code == 200:
                 remote_version = None
-                # 使用正则更稳健地提取版本号
-                v_match = re.search(r'VERSION = "(.*?)"', r.text)
+                # [v1.11.9] 兼容 Shell (VERSION="x") 与 Python (VERSION = "x") 格式
+                v_match = re.search(r'VERSION\s*=\s*"(.*?)"', r.text)
                 if v_match:
                     remote_version = v_match.group(1)
                     if v_tuple(remote_version) > v_tuple(VERSION) and remote_version != notified_version:
-                        # 获取更新日志 (Fetch latest changelog entry with cache-bust)
                         cl_r = requests.get(f"https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/CHANGELOG.md?t={t}", timeout=10)
                         notes = ""
                         if cl_r.status_code == 200:
@@ -955,11 +971,11 @@ def ota_monitor():
                         
                         btn = [[{"text": "📥 立即热更新 (One-Click)", "callback_data": f"ota_direct:{remote_version}"}]]
                         send_msg(f"🎉 <b>发现 Guardian 新版本！</b>\n当前运行: <code>{VERSION}</code>\n最新版本: <code>{remote_version}</code>{changelog_str}\n\n检测到助手已完整播报，您可以点击下方按钮直接热更新。", {"inline_keyboard": btn})
+                        
+                        # 持久化已通知的版本
                         notified_version = remote_version
-        except Exception as e:
-            # 仅在调试时开启，平时静默
-            # print(f"OTA Check error: {e}")
-            pass
+                        with open(nv_file, "w") as f: f.write(remote_version)
+        except: pass
         time.sleep(600)
 
 # --- 指令处理 ---
