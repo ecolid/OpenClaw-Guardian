@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.0"
+VERSION="v1.11.1"
 set -e
 
 # =================================================================
@@ -38,12 +38,12 @@ log_step "[0/5] 初始化配置"
 
 ENV_FILE="/root/.openclaw-guardian/.env"
 if [ -f "$ENV_FILE" ]; then
-    log_info "检测到已存在的配置文件 ($ENV_FILE)，自动加载配置跳过输入..."
+    log_info "正在从 $ENV_FILE 加载现有配置..."
     source "$ENV_FILE"
 fi
 
+# 1. 主 Bot Token 检查
 if [ -z "$TG_BOT_TOKEN" ]; then
-    # 要求用户输入 Telegram 主 Bot Token
     while true; do
         read -p "请输入你的 Telegram 主 Bot Token (例如 123456789:ABC...): " TG_BOT_TOKEN
         if [[ "$TG_BOT_TOKEN" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
@@ -54,13 +54,23 @@ if [ -z "$TG_BOT_TOKEN" ]; then
     done
 fi
 
+# 2. 备用 Bot Token 检查 (v1.11.1 交互增强)
 if [ -z "$TG_BOT_TOKEN_2" ]; then
-    # 要求用户输入备用 Bot Token (新增 v1.11.0)
-    read -p "请输入备用 Bot Token (可选，按回车跳过): " TG_BOT_TOKEN_2
+    echo -e "${YELLOW}提示: 您可以配置备用机器人以应对 Tele 限流封禁。${PLAIN}"
+    echo -n "按 [2] 键进入备用 Bot 配置 (2秒后将自动跳过): "
+    read -n 1 -t 2 CONFIRM_2 || true
+    echo ""
+    if [ "$CONFIRM_2" == "2" ]; then
+        read -p "请输入备用 Bot Token: " TG_BOT_TOKEN_2
+        if [[ ! "$TG_BOT_TOKEN_2" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
+            log_warn "备用 Token 格式不正确，本次将跳过备份链路加固。"
+            TG_BOT_TOKEN_2=""
+        fi
+    fi
 fi
 
+# 3. Chat ID 检查
 if [ -z "$TG_CHAT_ID" ]; then
-    # 要求用户输入 Telegram Chat ID
     while true; do
         read -p "请输入接收通知的 Telegram Chat ID (你的个人数字ID，例如 12345678): " TG_CHAT_ID
         if [[ "$TG_CHAT_ID" =~ ^[0-9]+$ || "$TG_CHAT_ID" =~ ^-[0-9]+$ ]]; then
@@ -342,7 +352,7 @@ BOT_TOKEN = "${TG_BOT_TOKEN}"
 BOT_TOKEN_2 = "${TG_BOT_TOKEN_2}"
 CHAT_ID = "${TG_CHAT_ID}"
 BACKUP_DIR = "${BACKUP_DIR}"
-VERSION = "v1.11.0"
+VERSION = "v1.11.1"
 SCHEDULE_FILE = os.path.join(BACKUP_DIR, "schedule.json")
 RESUME_FILE = os.path.join(BACKUP_DIR, "session_resume.json")
 STATS_FILE = os.path.join(BACKUP_DIR, "stats.json")
@@ -1292,20 +1302,30 @@ def main():
     try:
         r = requests.get(f"{get_api_url()}/getUpdates", timeout=5).json()
         if r.get("ok") and r["result"]:
-            ignored = r["result"][-1]["update_id"] + 1
-            requests.get(f"{get_api_url()}/getUpdates", params={"offset": ignored, "timeout": 1})
+            # [v1.11.1] 双机轮询偏移量
+            pass # The original code to ignore old updates is replaced by the new polling logic
     except: pass
     
-    offset = None
+    offset_1, offset_2 = None, None
     while True:
-        try:
-            r = requests.get(f"{get_api_url()}/getUpdates", params={"offset": offset, "timeout": 30}, timeout=35).json()
-            if r.get("ok"):
-                for upd in r["result"]:
-                    offset = upd["update_id"] + 1
-                    if "message" in upd: handle_msg(upd["message"])
-                    elif "callback_query" in upd: handle_callback(upd["callback_query"])
-        except: time.sleep(5)
+        # 轮流检查主、备机器人的更新
+        for bot_idx in [1, 2]:
+            try:
+                if bot_idx == 2 and not API_URL_2: continue
+                url = API_URL_1 if bot_idx == 1 else API_URL_2
+                off = offset_1 if bot_idx == 1 else offset_2
+                
+                r = requests.get(f"{url}/getUpdates", params={"offset": off, "timeout": 20}, timeout=25).json()
+                if r.get("ok"):
+                    for upd in r["result"]:
+                        new_off = upd["update_id"] + 1
+                        if bot_idx == 1: offset_1 = new_off
+                        else: offset_2 = new_off
+                        
+                        if "message" in upd: handle_msg(upd["message"])
+                        elif "callback_query" in upd: handle_callback(upd["callback_query"])
+            except: pass
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()
