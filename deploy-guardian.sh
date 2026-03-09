@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.13"
+VERSION="v1.11.14"
 set -e
 
 # =================================================================
@@ -592,26 +592,29 @@ def update_think_msg(final=False):
         total_seconds = s.get("total_thinking_seconds", 0)
         avg = total_seconds / max(1, total_convs)
         diff = elapsed - avg
-        if abs(diff) < 0.5: diff_info = " (⚖️ 持平)"
-        else: diff_info = f" ({'-' if diff < 0 else '+'}{abs(diff):.1f}s)"
-        perf_icon = "📈" if diff <= 0.5 else "📉"
+        # 整理辅助信息
+        wait_str = f" | ⏳ 延迟:{session_wait_ms}ms" if session_wait_ms > 0 else ""
+        diff_info = f"({diff:+}s)" if diff != 0 else ""
+        perf_icon = "📈" if diff < 0 else "📉"
         
-        fold_str = f"\n♻️ 记忆折叠: <code>{session_folds}</code> 次" if session_folds > 0 else ""
-        
-        # 工具明细渲染 (Live Fields)
         tool_items = []
         for k, v in session_tools.items():
             name = TOOL_MAP.get(k, k)
-            tool_items.append(f"{name}:{v}")
-        tool_str = f"\n🛠️ {' | '.join(tool_items)}" if tool_items else ""
+            tool_items.append(f"{name}:{v}次")
+        tool_final = f"🛠️ 使用工具：{'｜'.join(tool_items)}" if tool_items else ""
         
-        scale_str = f" (规模: <code>{session_scale/1000:.1f}k</code>)" if session_scale > 0 else ""
-        media_str = f"\n🖼️ 媒体优化: 节省 <code>{session_media_saved:.2f}MB</code>" if session_media_saved > 0.01 else ""
-        err_str = f"\n🚨 异常: <code>{session_error}</code>" if session_error else ""
-        wait_str = f" | ⏱️ 排队: <code>{session_wait_ms/1000:.1f}s</code>" if session_wait_ms > 50 else ""
-        warn_str = f"\n⚠️ 内容过长已截断" if session_warn else ""
-        
-        text = f"✅ <b>小龙虾思考完毕！</b>\n⏱️ 总耗时: <code>{elapsed}</code>s{wait_str} {perf_icon} <code>{diff_info}</code>\n📊 本次消耗: <code>{session_chars:,}</code> 字符{scale_str}{media_str}{tool_str}{fold_str}{err_str}{warn_str}"
+        media_str = f" | 🖼️ 节省:{session_media_saved:.1f}MB" if session_media_saved > 0 else ""
+        fold_str = f" | ♻️ 折叠:{session_folds}次" if session_folds > 0 else ""
+        err_str = f"\n🚨 异常报告: {session_error}" if session_error else ""
+        warn_str = f"\n⚠️ 长文警告: 消息可能被截断" if session_warn else ""
+
+        # 组装最终报文
+        text = f"🌕 虾虾思考完毕！\n"
+        text += f"⏱️ 本次思考: {elapsed}s {perf_icon} {diff_info}{wait_str}\n"
+        text += f"📊 本次消耗: {session_chars:,} 字符 (规模: {session_scale/1000:.1f}k){media_str}{fold_str}"
+        if tool_final: text += f"\n{tool_final}"
+        if err_str: text += err_str
+        if warn_str: text += warn_str
         
         # [v1.11.8] 数据持久化：更新统计指标
         s = load_stats()
@@ -649,23 +652,19 @@ def update_think_msg(final=False):
         tool_items = []
         for k, v in session_tools.items():
             name = TOOL_MAP.get(k, k)
-            tool_items.append(f"{name}:{v}")
-        tool_live = f" | 🛠️ {' '.join(tool_items)}" if tool_items else ""
+            tool_items.append(f"{name}:{v}次")
+        tool_live = f"🛠️ {'｜'.join(tool_items)}" if tool_items else ""
         err_live = " | 🚨 有异常" if session_error else ""
         
         inc_str = f" ({delta:+}s)" if delta != 0 else ""
         scale_live = f"<code>{session_scale/1000:.1f}k</code>" if session_scale > 0 else "初始化..."
         chars_live = f"<code>{session_chars:,}</code>" if session_chars > 0 else "计算中..."
         
-        text = f'''<b>Lobster 正在思考中... {icon}</b>
------------------------------------
-⏱️ 累计耗时: <code>{elapsed}</code>s {inc_str}
-📈 脑力负荷: {scale_live} 字符
-🎟️ 本次消耗: {chars_live} 字符
-{tool_live}
-{err_live}
------------------------------------
-<i>系统正在实时追踪 AI 思维链条...</i>'''
+        text = f"{icon} 虾虾思考：{elapsed}s{inc_str}\n"
+        text += f"📈 脑力负荷: {scale_live} 字符\n"
+        text += f"🎟️ 本次消耗: {chars_live} 字符"
+        if tool_live: text += f"\n{tool_live}"
+        if err_live: text += f"\n{err_live}"
     
     try:
         url = f"{get_api_url()}/editMessageText"
