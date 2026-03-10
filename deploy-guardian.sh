@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.18"
+VERSION="v1.11.19"
 set -e
 
 # =================================================================
@@ -549,19 +549,31 @@ def send_msg(text, reply_markup=None, disable_notification=False):
 
 def edit_msg(msg_id, text, reply_markup=None):
     """编辑现有消息 (v1.11.18 修复标签截断)"""
-    # [v1.11.18] 移除 edit_msg 内部的硬截断，因为会破坏 HTML 标签
-    # 逻辑：调用者必须确保文本长度在 4000 以内
     payload = {"chat_id": CHAT_ID, "message_id": msg_id, "text": text, "parse_mode": "HTML"}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     api_url = get_api_url()
     try:
         r = requests.post(f"{api_url}/editMessageText", json=payload, timeout=10)
         if r.status_code != 200:
-            # 如果还是失败，尝试发送无格式纯文本作为保底
             clean_text = f"⚠️ <b>渲染失败</b>: 可能是内容包含非法字符组合。\n\n错误摘要: {r.text[:100]}"
             requests.post(f"{api_url}/editMessageText", json={"chat_id": CHAT_ID, "message_id": msg_id, "text": clean_text, "parse_mode": "HTML"})
         return r
     except: return None
+
+def send_doc(file_path, caption=None):
+    """直接发送文件作为 Telegram 文档 (v1.11.19)"""
+    api_url = get_api_url()
+    try:
+        with open(file_path, 'rb') as f:
+            r = requests.post(f"{api_url}/sendDocument", data={"chat_id": CHAT_ID, "caption": caption, "parse_mode": "HTML"}, files={"document": f}, timeout=15)
+        return r
+    except: return None
+
+def delete_msg(msg_id):
+    """销毁指定消息 (v1.11.19 用于替换效果)"""
+    api_url = get_api_url()
+    try: requests.post(f"{api_url}/deleteMessage", json={"chat_id": CHAT_ID, "message_id": msg_id}, timeout=5)
+    except: pass
 
 def run_cmd(cmd, timeout_sec=None):
     try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=timeout_sec)
@@ -1495,24 +1507,17 @@ fi
     if data.startswith("cfg_view:"):
         rel_path = data.split(":")[1]
         base_dir = "/root/.openclaw"
+        target_path = os.path.join(base_dir, rel_path)
         try:
-            target_path = os.path.join(base_dir, rel_path)
-            if not os.path.exists(target_path): raise Exception("文件已丢失或路径错误")
-            with open(target_path, "r") as f: content = f.read()
+            if not os.path.exists(target_path): raise Exception("文件不存在或路径失效")
             
-            # [v1.11.18] 极其保守的截断：先截断原始文本到很小，确保加完各种标签也不超标
-            # 理由：JSON/YAML 等格式转义后体积可能暴涨 5-6 倍
-            if len(content) > 1500: content = content[:1500] + "\n...(内容过长，仅保留部分预览)..."
+            # [v1.11.19] 弃用文本预览，改用真正的文件分发
+            send_doc(target_path, caption=f"📄 <b>OpenClaw 核心配置</b>\n路径: <code>{rel_path}</code>\n节点: <code>Guardian {VERSION}</code>")
             
-            parent_dir = os.path.dirname(rel_path)
-            back_data = "cfg_root" if not parent_dir or parent_dir == "." else f"cfg_dir:{parent_dir}"
-            btn = [[{"text": "🔙 返回目录", "callback_data": back_data}]]
-            
-            title = f"📝 <b>文件: {os.path.basename(rel_path)}</b>\n<pre>{html.escape(content)}</pre>"
-            edit_msg(cb["message"]["message_id"], title, {"inline_keyboard": btn})
+            # [v1.11.19] 替换逻辑：销毁当前的交互菜单，让对话界面只留下文件
+            delete_msg(cb["message"]["message_id"])
         except Exception as e:
-            msg = f"❌ <b>读取操作失败</b>\n原因: <code>{html.escape(str(e))}</code>"
-            edit_msg(cb["message"]["message_id"], msg, {"inline_keyboard": [[{"text": "🔙 返回主配置", "callback_data": "cfg_root"}]]})
+            edit_msg(cb["message"]["message_id"], f"❌ <b>文件获取失败</b>\n原因: <code>{str(e)}</code>", {"inline_keyboard": [[{"text": "🔙 返回主配置", "callback_data": "cfg_root"}]]})
         return
     
     if data.startswith("cfg_dir:"):
