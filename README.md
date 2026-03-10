@@ -2,7 +2,7 @@
 > **为基于阿里百炼 (DASHSCOPE) 的 AI 智能体 [OpenClaw](https://github.com/vual/OpenClaw) 量身打造的极客级运维框架。**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version: v1.9.4](https://img.shields.io/badge/Version-v1.9.4-red.svg)](https://github.com/ecolid/OpenClaw-Guardian/releases)
+[![Version: v2.0.0](https://img.shields.io/badge/Version-v2.0.0-blue.svg)](https://github.com/ecolid/OpenClaw-Guardian/releases)
 
 ---
 
@@ -26,11 +26,19 @@
 - **监控全扫描**：精准捕捉 `prompt/completion` 消耗及全对话规模。
 - **异常实时回显**：工具调用失败（如 `DataInspectionFailed`）直接弹回原因。
 
+#### 🤖 双机粘性路由 (Sticky Resilient Routing)
+- **429 绕行**: 毫秒级识别 Telegram 限流，自动切换至备用 Bot 节点。
+- **状态探测**: 冷启动瞬间自检链路，确保发信权限 100% 可用。
+- **手动切流**: 支持通过 `/switch` 随时掌控当前活跃节点。
+
+#### ⚙️ 配置全能管理 (Config Mastery & Delivery)
+- **目录漫游**: 通过 `/config` 在 Telegram 中像操作网盘一样浏览 OpenClaw 目录。
+- **原始文件分发**: 点击即发，以无损 Document 格式直接获取 JSON/YAML/LOG 原始文件。
+- **消息销毁 UX**: 发送文件后自动清理菜单，保持频道绝对整洁。
+
 #### 🚀 秒级无感热更新 (Instant Seamless OTA)
-Guardian 独有的**无损续传**技术，让升级变得隐形：
-- **瞬时固化**：点击更新，Guardian 在毫秒级内将当前思考进度（计时、字数、工具快照）锁定到磁盘。
-- **镜像重启**：更新完成后，新版守护程序自动加载存档，接管之前的思考回执继续运行。
-- **结果**：数据 100% 保全，统计 0 遗漏，AI 的思考从未被打断。
+- **瞬时固化**: 点击更新，Guardian 在毫秒级内将当前思考进度锁定到磁盘。
+- **镜像重启**: 更新完成后，新版自动加载存档接管进度，AI 思考过程无断点。
 
 #### 📦 极致瘦身备份 (Slim Backup)
 针对 VPS 存储与 Telegram 传输优化：
@@ -61,7 +69,8 @@ curl -sL https://raw.githubusercontent.com/ecolid/OpenClaw-Guardian/main/deploy-
 | `/backup` | **即时瘦身备份**：一键封存超轻量级快照并同步云端。 |
 | `/rollback`| **时光回滚**：点选历史快照，一键无损还原配置与记忆。 |
 | `/grep [关键词]`| **案发现场**：定向抓取底层日志关键上下文 (如 400, OOM)。 |
-| `/logs` | **日志中心**：快速查阅业务日志或 Cron 备份日志详情。 |
+| `/config` | **配置管理**：交互式浏览 OpenClaw 目录并获取原始配置文件。 |
+| `/logs` | **日志中心**：快速查阅业务日志，支持大文件预览保护。 |
 | `/restart` | **强制重启**：当发现 AI 响应异常时，一键重启后端。 |
 | `/update` | **无感 OTA**：无视运行状态，秒级完成热更新并保留所有进度。 |
 
