@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.16"
+VERSION="v1.11.17"
 set -e
 
 # =================================================================
@@ -548,13 +548,20 @@ def send_msg(text, reply_markup=None, disable_notification=False):
     except: return None
 
 def edit_msg(msg_id, text, reply_markup=None):
-    """编辑现有消息 (v1.11.16 UX 增强)"""
-    if len(text) > 4000: text = text[:4000] + "\n...(内容过长已截断)..."
+    """编辑现有消息 (v1.11.17 增强韧性与回显)"""
+    if len(text) > 4000: text = text[:3800] + "\n...(由于 Telegram 限制，超长内容已强制截断)..."
     payload = {"chat_id": CHAT_ID, "message_id": msg_id, "text": text, "parse_mode": "HTML"}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     api_url = get_api_url()
-    try: return requests.post(f"{api_url}/editMessageText", json=payload, timeout=10)
-    except: return None
+    try:
+        r = requests.post(f"{api_url}/editMessageText", json=payload, timeout=10)
+        if r.status_code != 200:
+            # 如果编辑失败（如 HTML 标签冲突），尝试脱敏纯文本发送
+            clean_text = f"⚠️ <b>内容渲染受限 (API {r.status_code})</b>\n请尝试直接使用 SSH 查看该文件。\n\n错误信息: {r.text[:200]}"
+            requests.post(f"{api_url}/editMessageText", json={"chat_id": CHAT_ID, "message_id": msg_id, "text": clean_text, "parse_mode": "HTML"})
+        return r
+    except Exception as e:
+        return None
 
 def run_cmd(cmd, timeout_sec=None):
     try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=timeout_sec)
@@ -1488,19 +1495,29 @@ fi
     if data.startswith("cfg_view:"):
         rel_path = data.split(":")[1]
         base_dir = "/root/.openclaw"
-        # 内部渲染逻辑（此处复用 render_config_ui 的思路，但因为是在 callback 里，直接调用 edit_msg）
         try:
             target_path = os.path.join(base_dir, rel_path)
+            if not os.path.exists(target_path): raise Exception("文件已丢失或路径错误")
             with open(target_path, "r") as f: content = f.read()
-            if len(content) > 3500: content = content[:3500] + "\n...(内容过长，已被截断)..."
+            
+            # 严格字符缩减，防止 HTML 转义后字符激增
+            if len(content) > 3000: content = content[:3000] + "\n...(内容过长，已被系统截断预览)..."
+            
             parent_dir = os.path.dirname(rel_path)
-            back_data = f"cfg_dir:{parent_dir}" if parent_dir and parent_dir != "." else "cfg_root"
+            # 修正返回逻辑：防止出现 "." 路径
+            back_data = "cfg_root" if not parent_dir or parent_dir == "." else f"cfg_dir:{parent_dir}"
             btn = [[{"text": "🔙 返回目录", "callback_data": back_data}]]
-            edit_msg(cb["message"]["message_id"], f"📝 <b>配置预览: {os.path.basename(rel_path)}</b>\n<pre>{html.escape(content)}</pre>", {"inline_keyboard": btn})
-        except Exception as e: edit_msg(cb["message"]["message_id"], f"❌ 读取失败: {str(e)}")
+            
+            # 使用更稳健的标题栏格式
+            title = f"📝 <b>文件: {os.path.basename(rel_path)}</b>\n<pre>{html.escape(content)}</pre>"
+            edit_msg(cb["message"]["message_id"], title, {"inline_keyboard": btn})
+        except Exception as e:
+            edit_msg(cb["message"]["message_id"], f"❌ <b>读取操作失败</b>\n原因: <code>{html.escape(str(e))}</code>", {"inline_keyboard": [[{"text": "🔙 返回主配置", "callback_data": "cfg_root"}]]})
         return
+    
     if data.startswith("cfg_dir:"):
         rel_path = data.split(":")[1]
+        if rel_path == ".": rel_path = "" # 保护根路径
         base_dir = "/root/.openclaw"
         try:
             target_path = os.path.join(base_dir, rel_path)
@@ -1508,15 +1525,18 @@ fi
             buttons = []
             for f in sorted(files):
                 if f.startswith("."): continue
-                f_rel = os.path.join(rel_path, f)
+                f_rel = os.path.join(rel_path, f) if rel_path else f
                 if os.path.isdir(os.path.join(target_path, f)):
                     buttons.append([{"text": f"📁 {f}/", "callback_data": f"cfg_dir:{f_rel}"}])
                 else:
                     buttons.append([{"text": f"📄 {f}", "callback_data": f"cfg_view:{f_rel}"}])
+            
             parent = os.path.dirname(rel_path)
-            buttons.append([{"text": "🔙 返回上一级", "callback_data": f"cfg_dir:{parent}" if parent and parent != "." else "cfg_root"}])
-            edit_msg(cb["message"]["message_id"], f"📂 <b>目录: {rel_path}/</b>", {"inline_keyboard": buttons})
-        except Exception as e: edit_msg(cb["message"]["message_id"], f"❌ 目录访问失败: {str(e)}")
+            back_data = "cfg_root" if not parent or parent == "." else f"cfg_dir:{parent}"
+            buttons.append([{"text": "🔙 返回上一级", "callback_data": back_data}])
+            edit_msg(cb["message"]["message_id"], f"📂 <b>目录: {rel_path or '/'}/</b>", {"inline_keyboard": buttons})
+        except Exception as e:
+            edit_msg(cb["message"]["message_id"], f"❌ 目录访问受限: <code>{str(e)}</code>", {"inline_keyboard": [[{"text": "🔙 返回主目录", "callback_data": "cfg_root"}]]})
         return
     if data == "cfg_root":
         base_dir = "/root/.openclaw"
