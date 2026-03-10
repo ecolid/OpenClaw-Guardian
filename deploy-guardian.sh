@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.17"
+VERSION="v1.11.18"
 set -e
 
 # =================================================================
@@ -548,20 +548,20 @@ def send_msg(text, reply_markup=None, disable_notification=False):
     except: return None
 
 def edit_msg(msg_id, text, reply_markup=None):
-    """编辑现有消息 (v1.11.17 增强韧性与回显)"""
-    if len(text) > 4000: text = text[:3800] + "\n...(由于 Telegram 限制，超长内容已强制截断)..."
+    """编辑现有消息 (v1.11.18 修复标签截断)"""
+    # [v1.11.18] 移除 edit_msg 内部的硬截断，因为会破坏 HTML 标签
+    # 逻辑：调用者必须确保文本长度在 4000 以内
     payload = {"chat_id": CHAT_ID, "message_id": msg_id, "text": text, "parse_mode": "HTML"}
     if reply_markup: payload["reply_markup"] = json.dumps(reply_markup)
     api_url = get_api_url()
     try:
         r = requests.post(f"{api_url}/editMessageText", json=payload, timeout=10)
         if r.status_code != 200:
-            # 如果编辑失败（如 HTML 标签冲突），尝试脱敏纯文本发送
-            clean_text = f"⚠️ <b>内容渲染受限 (API {r.status_code})</b>\n请尝试直接使用 SSH 查看该文件。\n\n错误信息: {r.text[:200]}"
+            # 如果还是失败，尝试发送无格式纯文本作为保底
+            clean_text = f"⚠️ <b>渲染失败</b>: 可能是内容包含非法字符组合。\n\n错误摘要: {r.text[:100]}"
             requests.post(f"{api_url}/editMessageText", json={"chat_id": CHAT_ID, "message_id": msg_id, "text": clean_text, "parse_mode": "HTML"})
         return r
-    except Exception as e:
-        return None
+    except: return None
 
 def run_cmd(cmd, timeout_sec=None):
     try: return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=timeout_sec)
@@ -1500,19 +1500,19 @@ fi
             if not os.path.exists(target_path): raise Exception("文件已丢失或路径错误")
             with open(target_path, "r") as f: content = f.read()
             
-            # 严格字符缩减，防止 HTML 转义后字符激增
-            if len(content) > 3000: content = content[:3000] + "\n...(内容过长，已被系统截断预览)..."
+            # [v1.11.18] 极其保守的截断：先截断原始文本到很小，确保加完各种标签也不超标
+            # 理由：JSON/YAML 等格式转义后体积可能暴涨 5-6 倍
+            if len(content) > 1500: content = content[:1500] + "\n...(内容过长，仅保留部分预览)..."
             
             parent_dir = os.path.dirname(rel_path)
-            # 修正返回逻辑：防止出现 "." 路径
             back_data = "cfg_root" if not parent_dir or parent_dir == "." else f"cfg_dir:{parent_dir}"
             btn = [[{"text": "🔙 返回目录", "callback_data": back_data}]]
             
-            # 使用更稳健的标题栏格式
             title = f"📝 <b>文件: {os.path.basename(rel_path)}</b>\n<pre>{html.escape(content)}</pre>"
             edit_msg(cb["message"]["message_id"], title, {"inline_keyboard": btn})
         except Exception as e:
-            edit_msg(cb["message"]["message_id"], f"❌ <b>读取操作失败</b>\n原因: <code>{html.escape(str(e))}</code>", {"inline_keyboard": [[{"text": "🔙 返回主配置", "callback_data": "cfg_root"}]]})
+            msg = f"❌ <b>读取操作失败</b>\n原因: <code>{html.escape(str(e))}</code>"
+            edit_msg(cb["message"]["message_id"], msg, {"inline_keyboard": [[{"text": "🔙 返回主配置", "callback_data": "cfg_root"}]]})
         return
     
     if data.startswith("cfg_dir:"):
