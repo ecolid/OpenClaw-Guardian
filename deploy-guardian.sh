@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-VERSION="v1.11.14"
+VERSION="v1.11.15"
 set -e
 
 # =================================================================
@@ -1313,6 +1313,36 @@ def handle_msg(msg):
             [{"text": "⏰ 每天一次 (凌晨 00:00)", "callback_data": "sch_daily"}]
         ]
         send_msg(f"📅 <b>备份计划调度器</b>\n当前设置: <code>{s['label']}</code>\n请选择您希望的自动备份频率：", {"inline_keyboard": buttons})
+    elif text.startswith("/config"):
+        cmd_parts = text.split()
+        base_dir = "/root/.openclaw"
+        if len(cmd_parts) > 1:
+            target_file = cmd_parts[1]
+            if not target_file.startswith("/"):
+                target_file = os.path.join(base_dir, target_file)
+            
+            if os.path.exists(target_file) and os.path.isfile(target_file):
+                try:
+                    with open(target_file, "r") as f: content = f.read()
+                    if len(content) > 3500: content = content[:3500] + "\n...(内容过长，已被截断)..."
+                    send_msg(f"📝 <b>配置预览: {os.path.basename(target_file)}</b>\n<pre>{html.escape(content)}</pre>")
+                except Exception as e: send_msg(f"❌ 读取失败: {str(e)}")
+            else: send_msg(f"❌ 文件不存在: {target_file}")
+        else:
+            try:
+                if not os.path.exists(base_dir): raise Exception(f"目录 {base_dir} 不存在")
+                files = os.listdir(base_dir)
+                buttons = []
+                for f in sorted(files):
+                    if f.startswith("."): continue
+                    path = os.path.join(base_dir, f)
+                    if os.path.isdir(path):
+                        buttons.append([{"text": f"📁 {f}/", "callback_data": f"cfg_dir:{f}"}])
+                    elif f.endswith((".json", ".yaml", ".toml", ".conf", ".sh", ".py")):
+                        buttons.append([{"text": f"📄 {f}", "callback_data": f"cfg_view:{f}"}])
+                if not buttons: send_msg(f"📂 <b>OpenClaw 配置目录 ({base_dir})</b>\n未发现受支持的配置文件。")
+                else: send_msg("⚙️ <b>OpenClaw 配置管理中心</b>\n请选择要查看的文件或目录：", {"inline_keyboard": buttons})
+            except Exception as e: send_msg(f"❌ 目录访问失败: {str(e)}")
 
 def handle_callback(cb):
     data = cb["data"]
@@ -1428,6 +1458,31 @@ fi
                 send_msg(f"✅ <b>计划更新成功！</b>\n新的备份周期: <code>{modes[mode]['label']}</code>\n系统 crontab 已同步刷新。")
             else:
                 send_msg("❌ 计划更新失败，请检查文件权限。")
+        return
+    if data.startswith("cfg_view:"):
+        filename = data.split(":")[1]
+        handle_msg({"text": f"/config {filename}", "chat": {"id": CHAT_ID}})
+        return
+    if data.startswith("cfg_dir:"):
+        dirname = data.split(":")[1]
+        try:
+            base_dir = "/root/.openclaw"
+            target_path = os.path.join(base_dir, dirname)
+            files = os.listdir(target_path)
+            buttons = []
+            for f in sorted(files):
+                if f.startswith("."): continue
+                rel_path = os.path.join(dirname, f)
+                if os.path.isdir(os.path.join(target_path, f)):
+                    buttons.append([{"text": f"📁 {f}/", "callback_data": f"cfg_dir:{rel_path}"}])
+                else:
+                    buttons.append([{"text": f"📄 {f}", "callback_data": f"cfg_view:{rel_path}"}])
+            buttons.append([{"text": "🔙 返回主目录", "callback_data": "cfg_root"}])
+            send_msg(f"📂 <b>目录: {dirname}/</b>\n请选择文件或子目录：", {"inline_keyboard": buttons})
+        except Exception as e: send_msg(f"❌ 目录访问失败: {str(e)}")
+        return
+    if data == "cfg_root":
+        handle_msg({"text": "/config", "chat": {"id": CHAT_ID}})
         return
 
     if data == "cancel":
@@ -1605,6 +1660,7 @@ echo "  - 📦 极致瘦身备份   : 自动过滤 80% 冗余，同步 Telegram 
 echo "  - 🛡️ 稳捷守护监控   : 实时日志流检测 + 60s 异常兜底"
 echo ""
 echo -e "${YELLOW}🛠️ Telegram 指令集${PLAIN}"
+echo "  /config   - 检索并查看 OpenClaw 核心配置文件"
 echo "  /status   - 系统负载与 OpenClaw 综合健康评估"
 echo "  /stats    - 消耗统计中心 (今日/累计/节省流量)"
 echo "  /backup   - 立即执行一次瘦身快照备份"
